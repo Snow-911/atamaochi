@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v1-';
+const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v2-';
 let session;
 function leave(reason=''){const r=session;if(!r)return;session=null;clearInterval(r.clock);clearTimeout(r.timeout);r.peer?.destroy();setup.hidden=false;stage.hidden=true;notice.textContent=reason}
 function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
@@ -10,14 +10,14 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  const n=s.ids.length, speaker=s.turn%n+1;
  if(s.phase==='lobby'){line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ '+s.seconds+'秒 × '+s.rounds+'ラウンド');line('p',s.genres.join('・'));if(r.host&&n>=2)action('全員そろったら開始',()=>advance(r,'ready'))}
  else{line('p','ラウンド '+(Math.floor(s.turn/n)+1)+' / '+s.rounds+' ／ プレイヤー '+speaker+' の番');
- if(s.phase==='ready'){line('h2','プレイヤー '+speaker+'、準備はいい？');if(r.host)action('お題を開く',()=>{if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0];s.end=Date.now()+s.seconds*1000;advance(r,'play')})}
- if(['play','judge'].includes(s.phase)){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');if(s.phase==='play'){r.display=line('output','');r.display.setAttribute('aria-live','off');tick(r)}else{line('p',r.host?'時間終了！ 判定してください。':'時間終了！ ホストが判定中です。');if(r.host)for(const [label,ok] of [['オチた',true],['オチなかった',false]])action(label,()=>{s.results.push(ok);advance(r,'result')})}}
+ if(s.phase==='ready'){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');line('p',r.host?'お題を確認したら、トークを始めましょう。':'ホストがトークを開始するまでお待ちください。');if(r.host)action('トーク開始',()=>{s.end=Date.now()+s.seconds*1000;advance(r,'play')})}
+ if(['play','judge'].includes(s.phase)){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');if(s.phase==='play'){cue('start');r.gauge=makeGauge(stage,s.seconds);tick(r)}else{cue('end');line('p',r.host?'時間終了！ 判定してください。':'時間終了！ ホストが判定中です。');if(r.host)for(const [label,ok] of [['オチた',true],['オチなかった',false]])action(label,()=>{s.results.push(ok);advance(r,'result')})}}
  if(s.phase==='result'){line('h2',s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗');if(s.turn+1===n*s.rounds){line('h3','最終結果');s.ids.forEach((_,i)=>line('p','プレイヤー '+(i+1)+'：成功 '+s.results.filter((v,j)=>v&&j%n===i).length+' / '+s.rounds+'回'))}else if(r.host)action('次の番へ',()=>{s.turn++;advance(r,'ready')})}}
  line('hr','');const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
 }
-function tick(r){const s=r.state;if(s?.phase!=='play')return;const left=Math.max(0,Math.ceil((s.end-Date.now()-r.offset)/1000));r.display.textContent=left+' 秒';if(!left&&r.host)advance(r,'judge')}
+function tick(r){const s=r.state;if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)advance(r,'judge')}
 function publish(r){for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
-function advance(r,phase){r.state.phase=phase;publish(r)}
+function advance(r,phase){const s=r.state;if(phase==='ready'){if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}s.phase=phase;publish(r)}
 function begin(host){if(session)return;const code=host?String(crypto.getRandomValues(new Uint32Array(1))[0]%1000000).padStart(6,'0'):codeBox.value.trim();
  if(!/^\d{6}$/.test(code)){notice.textContent='6桁のコードを入力してください。';return}
  if(host&&!chosen().length){notice.textContent='ジャンルを選んでください。';return}
@@ -36,3 +36,4 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
 }
 $('createRoom').onclick=()=>begin(true);$('joinRoom').onclick=()=>begin(false);
 })();
+
