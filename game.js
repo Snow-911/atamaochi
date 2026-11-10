@@ -108,13 +108,54 @@ for (const [genre, prompts] of Object.entries(bank)) {
  }
  $('topics').append(heading, list);
 }
+function orderButton(text, description, disabled, click) {
+ const button = document.createElement('button');
+ button.type = 'button';
+ button.textContent = text;
+ button.setAttribute('aria-label', description);
+ button.disabled = disabled;
+ button.onclick = click;
+ return button;
+}
+function addOrderControls(row, index, order, label, update) {
+ for (const offset of [-1, 1]) {
+  const destination = index + offset;
+  const earlier = offset < 0;
+  row.append(orderButton(earlier ? '↑' : '↓', label + (earlier ? 'を前へ' : 'を後ろへ'),
+   destination < 0 || destination >= order.length, () => {
+    const next = order.slice();
+    [next[index], next[destination]] = [next[destination], next[index]];
+    update(next);
+   }));
+ }
+}
+function shuffleButton(order, update) {
+ return orderButton('シャッフル', 'トーク順をシャッフル', order.length < 2, () => {
+  const next = order.slice();
+  do {
+   for (let i = next.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+   }
+  } while (next.every((value, i) => value === order[i]));
+  update(next);
+ });
+}
 const localNames = [];
-$('players').addEventListener('change', () => {
+function renderLocalNames() {
  const count = Number($('players').value);
  const fields = $('localNames');
  fields.replaceChildren();
  if (count === 1) return;
+ const order = Array.from({length: count}, (_, index) => index);
+ function reorder(indices) {
+  const values = indices.map(index => localNames[index]);
+  localNames.splice(0, count, ...values);
+  renderLocalNames();
+ }
  for (let i = 0; i < count; i++) {
+  const row = document.createElement('div');
+  row.className = 'order-row';
   const label = document.createElement('label');
   label.textContent = (i + 1) + '人目のニックネーム ';
   const input = document.createElement('input');
@@ -123,9 +164,13 @@ $('players').addEventListener('change', () => {
   input.value = localNames[i] || '';
   input.oninput = () => { localNames[i] = input.value.trim(); };
   label.append(input);
-  fields.append(label);
+  row.append(label);
+  addOrderControls(row, i, order, (i + 1) + '人目', reorder);
+  fields.append(row);
  }
-});
+ fields.append(shuffleButton(order, reorder));
+}
+$('players').addEventListener('change', renderLocalNames);
 function localName(number) {
  return count === 1 ? 'プレイヤー 1' : localNames[number - 1];
 }

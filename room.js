@@ -37,7 +37,20 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  if(s.phase==='lobby'){
  line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ 1人1トーク');
  addInviteLink(r.code);
- line('p', 'トーク順：' + s.ids.map(id => s.names[id]).join(' → '));
+ line('h3', 'トーク順');
+ const updateOrder = ids => {
+  s.ids = ids;
+  publish(r);
+ };
+ s.ids.forEach((id, index) => {
+  const row = line('div', '');
+  row.className = 'order-row';
+  const name = document.createElement('span');
+  name.textContent = (index + 1) + '. ' + s.names[id];
+  row.append(name);
+  if (r.host) addOrderControls(row, index, s.ids, s.names[id], updateOrder);
+ });
+ if (r.host) stage.append(shuffleButton(s.ids, updateOrder));
  if(r.host){
  line('h3','ルーム設定');line('p','お題のジャンル（1つ以上）');const grid=line('div','');grid.className='grid';
  for(const g of Object.keys(bank)){const label=document.createElement('label'),input=document.createElement('input');label.className='tile';input.type='checkbox';input.checked=s.genres.includes(g);input.disabled=input.checked&&s.genres.length===1;input.onchange=()=>{s.genres=Object.keys(bank).filter(x=>x===g?input.checked:s.genres.includes(x));publish(r);stage.querySelectorAll('.tile input')[Object.keys(bank).indexOf(g)]?.focus()};label.append(input,document.createTextNode(g));grid.append(label)}
