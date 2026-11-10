@@ -195,12 +195,25 @@ start.onclick=()=>{
  }
  pool=chosen().flatMap(g=>bank[g].map(t=>({g,t})));deck=[];log=[];last=null;count=+$('players').value;secs=duration;setup.hidden=true;stage.hidden=false;ready()};
 const who=()=>log.length%count+1, info=()=>'トーク '+(log.length+1);
-function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+escapedName(who())+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',play)}
-function play() {
+function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+escapedName(who())+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown)}
+function startCountdown() {
+ screen('<h2>「'+last.t+'」</h2>');
+ const startAt = Date.now() + 3000;
+ const display = makeCountdown(stage);
+ function update() {
+  if (!display(startAt - Date.now())) {
+   clearInterval(timer);
+   play(startAt);
+  }
+ }
+ timer = setInterval(update, 50);
+ update();
+}
+function play(startAt) {
  cue('start');
  screen('<p>'+info()+' ／ '+escapedName(who())+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2>');
  const gauge = makeGauge(stage, secs);
- const deadline = Date.now() + secs * 1000;
+ const deadline = startAt + secs * 1000;
  let finished = false;
  function finishTalk() {
   if (finished) return;

@@ -34,3 +34,23 @@ function cue(kind) {
  });
 }
 function makeGauge(container,total){const bar=document.createElement('progress'),out=document.createElement('output');bar.max=total;bar.value=total;bar.setAttribute('aria-label','残り時間');out.setAttribute('aria-live','off');container.append(out,bar);let previous=total;return ms=>{const value=Math.max(0,Math.min(total,ms/1000)),sec=Math.ceil(value);bar.value=value;bar.classList.toggle('urgent',sec<=3);out.textContent='残り '+sec+' 秒';if(sec>0&&sec<=3&&sec<previous)cue('tick');previous=sec;return sec}}
+
+function makeCountdown(container) {
+ const panel = document.createElement('div');
+ panel.className = 'countdown';
+ panel.setAttribute('role', 'status');
+ panel.textContent = 'トーク開始まで';
+ container.append(panel);
+ let previous;
+ return milliseconds => {
+  const value = Math.max(0, Math.min(3, Math.ceil(milliseconds / 1000)));
+  if (value && value !== previous) {
+   panel.querySelector('strong')?.remove();
+   const digit = document.createElement('strong');
+   digit.textContent = value;
+   panel.append(digit);
+   previous = value;
+  }
+  return value;
+ };
+}
