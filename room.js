@@ -166,7 +166,8 @@ function relayLaugh(r, sender, turn) {
  playLaugh();
 }
 function eligibleVoters(s) {
- return [...s.ids.filter(id => id !== s.ids[s.turn]), ...s.spectators];
+ const players = s.mode === 'team' ? s.ids : s.ids.filter(id => id !== s.ids[s.turn]);
+ return [...players, ...s.spectators];
 }
 function settleVotes(r) {
  const s = r.state;
