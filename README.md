@@ -8,3 +8,5 @@
 
 ## GitHub Pages
 このフォルダーの HTML、JavaScript、画像、ライセンスを公開元のディレクトリに配置してください。
+
+[効果音のクレジット](sounds/CREDITS.md)

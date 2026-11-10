@@ -1,11 +1,36 @@
-let audioCtx, soundOn=true;
-function unlockAudio(){try{const AC=window.AudioContext||window.webkitAudioContext;if(AC&&soundOn){audioCtx??=new AC();if(audioCtx.state!=='running')audioCtx.resume().catch(()=>{})}}catch{}}
+let audioCtx, masterGain, soundOn = true;
+const clips = new Map();
+const playing = new Map();
+const clipLevels = {start: 0.72, end: 0.82, tick: 0.42, laugh: 0.78};
+function unlockAudio() {
+ if (!soundOn) return;
+ const AC = window.AudioContext || window.webkitAudioContext;
+ if (!AC) return;
+ if (!audioCtx) {
+  audioCtx = new AC();
+  masterGain = audioCtx.createGain();
+  masterGain.connect(audioCtx.destination);
+  displayVolume();
+ }
+ if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+ for (const kind of Object.keys(clipLevels)) {
+  if (clips.has(kind)) continue;
+  clips.set(kind, fetch('./sounds/'+kind+'.wav')
+   .then(response => {
+    if (!response.ok) throw new Error('Audio load failed');
+    return response.arrayBuffer();
+   })
+   .then(bytes => audioCtx.decodeAudioData(bytes))
+   .catch(() => { clips.delete(kind); return null; }));
+ }
+}
 document.addEventListener('click',unlockAudio,true);
 const toggle=document.getElementById('sound');
-toggle.onclick=()=>{soundOn=!soundOn;toggle.textContent='効果音 '+(soundOn?'ON':'OFF');toggle.setAttribute('aria-pressed',soundOn);if(soundOn)unlockAudio()};
+toggle.onclick=()=>{soundOn=!soundOn;toggle.textContent='効果音 '+(soundOn?'ON':'OFF');toggle.setAttribute('aria-pressed',soundOn);displayVolume();if(soundOn)unlockAudio();else for(const source of playing.values())source.stop()};
 const volume = document.getElementById('volume');
 try { const stored = localStorage.getItem('atamaochi-volume'); if (stored !== null) volume.value = stored; } catch {}
 function displayVolume() {
+ if (masterGain) masterGain.gain.value = soundOn ? Number(volume.value)/100 : 0;
  document.getElementById('volumeValue').textContent = volume.value + '%';
 }
 displayVolume();
@@ -14,24 +39,23 @@ volume.oninput = () => {
  try { localStorage.setItem('atamaochi-volume', volume.value); } catch {}
 };
 volume.onchange = () => { unlockAudio(); cue('end'); };
-function cue(kind) {
- const level = Number(volume.value) / 100;
- if (!level || !soundOn || audioCtx?.state !== 'running') return;
- const chords = {start:[[523],[784]], tick:[[660]], end:[[392,494,587],[523,659,784]]}[kind];
- chords.forEach((chord, index) => {
-  const time = audioCtx.currentTime + index * (kind === 'end' ? 0.23 : 0.13);
-  const duration = kind === 'end' ? (index ? 0.44 : 0.17) : 0.1;
-  for (const hz of chord) {
-   const oscillator = audioCtx.createOscillator(), gain = audioCtx.createGain();
-   oscillator.type = kind === 'end' ? 'triangle' : 'sine';
-   oscillator.frequency.value = hz;
-   gain.gain.setValueAtTime(0.00001, time);
-   gain.gain.exponentialRampToValueAtTime(0.2 * level / chord.length, time + 0.01);
-   gain.gain.exponentialRampToValueAtTime(0.00001, time + duration);
-   oscillator.connect(gain); gain.connect(audioCtx.destination);
-   oscillator.start(time); oscillator.stop(time + duration);
-  }
- });
+async function cue(kind) {
+ if (!soundOn || !Number(volume.value) || !audioCtx) return;
+ const requested = performance.now();
+ const buffer = await clips.get(kind);
+ if (!buffer || !soundOn || audioCtx.state !== 'running' || performance.now()-requested > 400) return;
+ playing.get(kind)?.stop();
+ const source = audioCtx.createBufferSource();
+ const gain = audioCtx.createGain();
+ gain.gain.value = clipLevels[kind];
+ source.buffer = buffer;
+ source.connect(gain).connect(masterGain);
+ playing.set(kind,source);
+ source.onended = () => {
+  source.disconnect(); gain.disconnect();
+  if (playing.get(kind) === source) playing.delete(kind);
+ };
+ source.start();
 }
 function makeGauge(container,total){const bar=document.createElement('progress'),out=document.createElement('output');bar.max=total;bar.value=total;bar.setAttribute('aria-label','残り時間');out.setAttribute('aria-live','off');container.append(out,bar);let previous=total;return ms=>{const value=Math.max(0,Math.min(total,ms/1000)),sec=Math.ceil(value);bar.value=value;bar.classList.toggle('urgent',sec<=3);out.textContent='残り '+sec+' 秒';if(sec>0&&sec<=3&&sec<previous)cue('tick');previous=sec;return sec}}
 
@@ -55,44 +79,7 @@ function makeCountdown(container) {
  };
 }
 
-// Short voiced "ha" bursts. The falling pitch and vowel resonances shape each chuckle.
-let activeLaugh;
-function playLaugh() {
- const level = Number(volume.value) / 100;
- if (!level || !soundOn || audioCtx?.state !== 'running') return;
- activeLaugh?.disconnect();
- const mix = audioCtx.createGain();
- activeLaugh = mix;
- mix.gain.value = level * 0.45;
- mix.connect(audioCtx.destination);
- const voice = audioCtx.createOscillator();
- voice.type = 'sawtooth';
- const envelope = audioCtx.createGain();
- envelope.gain.value = 0;
- voice.connect(envelope);
- for (const [frequency, strength] of [[780, 1], [1240, 0.75], [2550, 0.25]]) {
-  const resonance = audioCtx.createBiquadFilter();
-  resonance.type = 'bandpass';
-  resonance.frequency.value = frequency;
-  resonance.Q.value = 4;
-  const gain = audioCtx.createGain();
-  gain.gain.value = strength;
-  envelope.connect(resonance).connect(gain).connect(mix);
- }
- const start = audioCtx.currentTime;
- const pitch = 220 + Math.random() * 60;
- [0, 0.15, 0.32, 0.51].forEach((offset, i) => {
-  const t = start + offset;
-  voice.frequency.setValueAtTime(pitch * (1.15 - i * 0.07), t);
-  voice.frequency.exponentialRampToValueAtTime(pitch * 0.66, t + 0.12);
-  envelope.gain.setValueAtTime(0, t);
-  envelope.gain.linearRampToValueAtTime(0.95 - i * 0.11, t + 0.024);
-  envelope.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
- });
- voice.onended = () => { mix.disconnect(); if (activeLaugh === mix) activeLaugh = null; };
- voice.start(start);
- voice.stop(start + 0.68);
-}
+function playLaugh() { cue('laugh'); }
 
 function revealVerdict(container, success) {
  const title = container.querySelector('.verdict') || container.querySelector('h2');
