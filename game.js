@@ -141,61 +141,27 @@ function shuffleButton(order, update) {
   update(next);
  });
 }
-const localNames = [];
-function renderLocalNames() {
- const count = Number($('players').value);
- const fields = $('localNames');
- fields.replaceChildren();
- if (count === 1) return;
- const order = Array.from({length: count}, (_, index) => index);
- function reorder(indices) {
-  const values = indices.map(index => localNames[index]);
-  localNames.splice(0, count, ...values);
-  renderLocalNames();
- }
- for (let i = 0; i < count; i++) {
-  const row = document.createElement('div');
-  row.className = 'order-row';
-  const label = document.createElement('label');
-  label.textContent = (i + 1) + '人目のニックネーム ';
-  const input = document.createElement('input');
-  input.maxLength = 20;
-  input.required = true;
-  input.value = localNames[i] || '';
-  input.oninput = () => { localNames[i] = input.value.trim(); };
-  label.append(input);
-  row.append(label);
-  addOrderControls(row, i, order, (i + 1) + '人目', reorder);
-  fields.append(row);
- }
- fields.append(shuffleButton(order, reorder));
-}
-$('players').addEventListener('change', renderLocalNames);
-function localName(number) {
- return count === 1 ? 'プレイヤー 1' : localNames[number - 1];
-}
-function escapedName(number) {
- const node = document.createElement('span');
- node.textContent = localName(number);
- return node.innerHTML;
-}
 let duration=60;
 function adjust(n){duration=Math.max(10,Math.min(600,duration+n));$('sec').textContent=duration+'秒';$('less').disabled=duration===10;$('more').disabled=duration===600}
 $('less').onclick=()=>adjust(-10);$('more').onclick=()=>adjust(10);
-for(let n=1;n<=8;n++)$('players').add(new Option(n+'人',n));
+
 const chosen=()=>Array.from(document.querySelectorAll('#genres input:checked'),e=>e.value);
-$('genres').onchange=()=>{start.disabled=!chosen().length;start.textContent=start.disabled?'ジャンルを1つ以上選んでください':'ゲーム開始 ▶'};
-let pool,deck,last,log,count,secs,timer;
+$('genres').onchange=()=>{start.disabled=!chosen().length;start.textContent=start.disabled?'ジャンルを1つ以上選んでください':'ひとりで遊ぶ'};
+let pool,deck,last,attempts,wins,secs,timer;
 function screen(html){stage.innerHTML=html;stage.focus()}
 function button(label,fn,primary=true){const b=document.createElement('button');b.textContent=label;if(primary)b.className='primary';(stage.querySelector('.actions')||stage).append(b);b.onclick=fn}
 start.onclick=()=>{
- for (const field of $('localNames').querySelectorAll('input')) {
-  field.setCustomValidity(field.value.trim() ? '' : 'ニックネームを入力してください。');
-  if (!field.reportValidity()) return;
- }
- pool=chosen().flatMap(g=>bank[g].map(t=>({g,t})));deck=[];log=[];last=null;count=+$('players').value;secs=duration;setup.hidden=true;stage.hidden=false;ready()};
-const who=()=>log.length%count+1, info=()=>'トーク '+(log.length+1);
-function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+escapedName(who())+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown)}
+ pool = chosen().flatMap(g => bank[g].map(t => ({g,t})));
+ deck = [];
+ last = null;
+ attempts = wins = 0;
+ secs = duration;
+ setup.hidden = true;
+ stage.hidden = false;
+ ready();
+};
+const info = () => 'トーク ' + (attempts + 1);
+function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown)}
 function startCountdown() {
  screen('<h2>「'+last.t+'」</h2>');
  const startAt = Date.now() + 3000;
@@ -211,7 +177,7 @@ function startCountdown() {
 }
 function play(startAt) {
  cue('start');
- screen('<p>'+info()+' ／ '+escapedName(who())+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2>');
+ screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2>');
  const gauge = makeGauge(stage, secs);
  const deadline = startAt + secs * 1000;
  let finished = false;
@@ -220,7 +186,7 @@ function play(startAt) {
   finished = true;
   clearInterval(timer);
   cue('end');
-  screen('<p>トーク終了 ／ '+escapedName(who())+'</p><h2>オチはついた？</h2><p>「'+last.t+'」</p><div class="actions"></div>');
+  screen('<p>トーク終了</p><h2>オチはついた？</h2><p>「'+last.t+'」</p><div class="actions"></div>');
   button('オチた', () => score(true));
   button('オチなかった', () => score(false), false);
  }
@@ -229,7 +195,14 @@ function play(startAt) {
  timer = setInterval(tick, 150);
  tick();
 }
-function score(ok){log.push({p:who(),ok});if(count>1&&log.length===count){finish();return}screen('<h2>'+(ok?'オチた！ 成功':'オチなかった… 失敗')+'</h2><div class="actions"></div>');button('次へ：'+localName(who()),ready);if(count===1)button('ゲーム終了',finish,false)}
-function finish(){screen('<h2>ゲーム結果</h2><p>最後のトーク：'+(log.at(-1).ok?'成功':'失敗')+'</p><ul>'+Array.from({length:count},(_,i)=>{const turns=log.filter(x=>x.p===i+1),wins=turns.filter(x=>x.ok).length;return '<li>'+escapedName(i+1)+'：成功 '+wins+' 回 ／ 失敗 '+(turns.length-wins)+' 回</li>'}).join('')+'</ul>');button('設定に戻る',()=>{stage.hidden=true;setup.hidden=false;start.focus()})}
-
-
+function score(ok) {
+ attempts++;
+ if (ok) wins++;
+ screen('<h2>'+(ok?'オチた！ 成功':'オチなかった… 失敗')+'</h2><p>成功 '+wins+' 回 ／ 失敗 '+(attempts-wins)+' 回</p><div class="actions"></div>');
+ button('もう一度', ready);
+ button('ロビーに戻る', () => {
+  stage.hidden = true;
+  setup.hidden = false;
+  start.focus();
+ }, false);
+}
