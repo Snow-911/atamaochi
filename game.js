@@ -175,6 +175,7 @@ function pendingSoloActions() {
  button('オチなかった',null,false);
 }
 function startCountdown() {
+ trackGame('game_start',$('mode').value,'solo',1);
  screen('<h2>「'+last.t+'」</h2>');
  const startAt = Date.now() + 3000;
  const display = makeCountdown(stage);
@@ -211,6 +212,7 @@ function play(startAt) {
  tick();
 }
 function score(ok) {
+ trackGame('game_complete',$('mode').value,'solo',1);
  attempts++;
  if (ok) wins++;
  screen('<h2>'+(ok?'オチた！ 成功':'オチなかった… 失敗')+'</h2><p>成功 '+wins+' 回 ／ 失敗 '+(attempts-wins)+' 回</p><div class="actions"></div>');

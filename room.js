@@ -373,7 +373,15 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
 }
 function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)finishTurn(r)}
 function publish(r){r.state.revision=(r.state.revision || 0)+1;for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
-function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(s.mode !== 'team' || !s.prompt || s.phase === 'lobby'){if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}}s.phase=phase;
+function advance(r,phase){const s=r.state;
+ if (s.phase === 'lobby' && phase === 'ready') {
+  r.startingPlayers = s.ids.length;
+  trackGame('game_start',s.mode,'room',r.startingPlayers);
+ }
+ if (phase === 'finished' && s.phase !== 'finished') {
+  trackGame('game_complete',s.mode,'room',r.startingPlayers);
+ }
+ if(phase==='ready'){s.serial=(s.serial||0)+1;if(s.mode !== 'team' || !s.prompt || s.phase === 'lobby'){if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}}s.phase=phase;
  if (phase === 'judge') {
   r.ballots = new Map();
   return settleVotes(r);
