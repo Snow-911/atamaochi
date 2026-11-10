@@ -61,6 +61,12 @@ function removeTurn(r, index) {
   r.deck = [];
   return advance(r,'lobby');
  }
+ if (s.mode === 'team' && s.phase !== 'lobby') {
+  s.turn = Math.min(s.turn,s.ids.length - 1);
+  if (s.phase === 'judge') return settleVotes(r);
+  if (current && s.phase !== 'finished') return advance(r,'ready');
+  return publish(r);
+ }
  if (s.phase !== 'lobby') {
   if (s.results.length === s.ids.length) return advance(r, 'finished');
   if (current) return advance(r, 'ready');
@@ -205,6 +211,14 @@ function mayAdvance(r, id) {
  const s = r.state;
  return !!s.ids[s.turn+1] && [r.hostId, s.ids[s.turn], s.ids[s.turn+1]].includes(id);
 }
+function finishTurn(r) {
+ const s = r.state;
+ if (s.mode === 'team' && s.turn + 1 < s.ids.length) {
+  s.turn++;
+  return advance(r,'ready');
+ }
+ advance(r,'judge');
+}
 function turnAction(r, type, ok, sender = r.id) {
  const s = r.state;
  if (!r.host) {
@@ -219,7 +233,7 @@ function turnAction(r, type, ok, sender = r.id) {
   s.end = s.startAt + s.seconds * 1000;
   advance(r, 'countdown');
  } else if (type === 'finishTalk' && s.phase === 'play' && (sender === s.ids[s.turn] || sender === r.hostId)) {
-  advance(r, 'judge');
+  finishTurn(r);
 
  }
 }
@@ -265,7 +279,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  for(const g of Object.keys(bank)){const label=document.createElement('label'),input=document.createElement('input');label.className='tile';input.type='checkbox';input.checked=s.genres.includes(g);input.disabled=input.checked&&s.genres.length===1;input.onchange=()=>{s.genres=Object.keys(bank).filter(x=>x===g?input.checked:s.genres.includes(x));publish(r);stage.querySelectorAll('.tile input')[Object.keys(bank).indexOf(g)]?.focus()};label.append(input,document.createTextNode(g));grid.append(label)}
  line('h3','制限時間');const step=line('div','');step.className='stepper';for(const delta of [-10,10]){if(delta>0){const value=document.createElement('span');value.textContent=s.seconds+'秒';step.append(value)}const control=document.createElement('button');control.textContent=delta<0?'−':'＋';control.setAttribute('aria-label',delta<0?'10秒減らす':'10秒増やす');control.disabled=delta<0?s.seconds<=10:s.seconds>=600;control.onclick=()=>{s.seconds=Math.max(10,Math.min(600,s.seconds+delta));publish(r);stage.querySelectorAll('.stepper button')[delta<0?0:1]?.focus()};step.append(control)}
  line('p','開始すると設定が確定します。');action('全員そろったら開始',()=>advance(r,'ready'),n>=2)
- }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p',modes[s.mode || 'normal'][0]+' ｜ '+modes[s.mode || 'normal'][1]);if(s.phase!=='finished')line('p',s.mode==='team'?'全員でトーク ／ 進行：'+speaker:'トーク '+(s.turn+1)+' ／ '+speaker+' の番');
+ }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p',modes[s.mode || 'normal'][0]+' ｜ '+modes[s.mode || 'normal'][1]);if(s.phase!=='finished')line('p',s.mode==='team'?(s.turn+1)+' / '+n+'人目 ／ '+speaker+' の番（'+(s.turn===n-1?'オチをつける':s.turn===0?'話を始める':'話をつなぐ')+'）':'トーク '+(s.turn+1)+' ／ '+speaker+' の番');
  const canAct = !watching && (r.host || s.ids[s.turn] === r.id);
  if (['ready','countdown','play','judge'].includes(s.phase)) {
   line('p', s.prompt[0]);
@@ -321,9 +335,9 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
   action('トーク開始', () => turnAction(r,'startTalk'), s.phase==='ready' && r.id===s.ids[s.turn]);
  }
  if (beforeVote && canAct) {
-  action('オチを言い終えた', () => turnAction(r,'finishTalk'), s.phase==='play');
+  action(s.mode==='team' && s.turn+1<n ? '話をつないだ！ 次の人へ' : 'オチを言い終えた', () => turnAction(r,'finishTalk'), s.phase==='play');
  }
- if (beforeVote && eligibleVoters(s).includes(r.id)) {
+ if (beforeVote && (s.mode!=='team' || s.turn+1===n) && eligibleVoters(s).includes(r.id)) {
   action('オチた',null,false);
   action('オチなかった',null,false);
  }
@@ -356,7 +370,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  }
  const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
 }
-function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)advance(r,'judge')}
+function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)finishTurn(r)}
 function publish(r){r.state.revision=(r.state.revision || 0)+1;for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
 function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(s.mode !== 'team' || !s.prompt || s.phase === 'lobby'){if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}}s.phase=phase;
  if (phase === 'judge') {

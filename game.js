@@ -133,7 +133,7 @@ function shuffleButton(order, update) {
 const modes = {
  normal: ['ジュンバンオチ','一人ずつ、自分のお題にオチをつけよう。'],
  quick: ['ソクオチ','お題に続く一文でオチをつけよう。'],
- team: ['ナカマオチ','全員で一つの話をつないで、オチをつけよう。先頭の人がトークを開始します。']
+ team: ['ナカマオチ','同じお題で一人ずつ話をつなぎ、最後の人がオチをつけよう。']
 };
 function fillModes(select, selected) {
  for (const [value,[name]] of Object.entries(modes)) select.add(new Option(name,value));
