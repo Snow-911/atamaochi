@@ -32,10 +32,19 @@ function leave(reason=''){const r=session;if(!r)return;session=null;clearInterva
 function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  const line=(tag,str)=>{const el=document.createElement(tag);el.textContent=str;stage.append(el);return el};
  const action=(label,fn)=>{const b=line('button',label);b.className='primary';b.onclick=fn};
- line('p','ルーム '+r.code+' ／ '+(r.host?'ホスト：':'あなた：')+s.names[r.peer.id]);
+
  const n=s.ids.length, speaker=s.names[s.ids[s.turn % n]];
  if(s.phase==='lobby'){
  line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ 1人1トーク');
+ const codeToggle = line('button', r.showCode ? 'コードを非表示' : 'コードを表示');
+ const codeText = line('span', '');
+ function renderCode() {
+  codeToggle.textContent = r.showCode ? 'コードを非表示' : 'コードを表示';
+  codeToggle.setAttribute('aria-expanded', String(Boolean(r.showCode)));
+  codeText.textContent = r.showCode ? ' ルームコード ' + r.code + ' ' : '';
+ }
+ codeToggle.onclick = () => { r.showCode = !r.showCode; renderCode(); };
+ renderCode();
  addInviteLink(r.code);
  line('h3', 'トーク順');
  const updateOrder = ids => {
