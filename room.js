@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v6-';
+const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v7-';
 let session;
 function addInviteLink(code) {
  const url = new URL('https://snow-911.github.io/atamaochi/');
@@ -34,23 +34,51 @@ function addInviteLink(code) {
 function leave(reason=''){const r=session;if(!r)return;session=null;$('roster').hidden=true;clearInterval(r.clock);clearTimeout(r.timeout);r.relay?.destroy();r.peer?.destroy?.();setup.hidden=false;stage.hidden=true;notice.textContent=reason}
 function kick(r, id) {
  const s = r.state, index = s.ids.indexOf(id);
- if (!r.host || index < 0 || id === r.id || !confirm(s.names[id] + 'さんを退出させますか？')) return;
+ if (!r.host || !s.names[id] || id === r.id || !confirm(s.names[id] + 'さんを退出させますか？')) return;
  const connection = r.links.get(id);
  r.links.delete(id);
  if (connection?.open) {
   connection.send({type:'reject', reason:'ホストによって退出しました。'});
   setTimeout(() => connection.close(), 300);
  }
+ delete s.names[id];
+ if (index < 0) {
+  s.spectators = s.spectators.filter(member => member !== id);
+  return publish(r);
+ }
+ removeTurn(r, index);
+}
+function removeTurn(r, index) {
+ const s = r.state;
  const current = index === s.turn;
  s.ids.splice(index, 1);
- delete s.names[id];
  if (index < s.results.length) s.results.splice(index, 1);
  if (index < s.turn) s.turn--;
+ if (!s.ids.length) {
+  s.turn = 0;
+  s.results = [];
+  r.deck = [];
+  return advance(r,'lobby');
+ }
  if (s.phase !== 'lobby') {
   if (s.results.length === s.ids.length) return advance(r, 'finished');
   if (current) return advance(r, 'ready');
+  if (s.phase === 'judge') return settleVotes(r);
  }
  publish(r);
+}
+function setSpectating(r, id, watch) {
+ const s = r.state;
+ if (!s.names[id] || typeof watch !== 'boolean' || s.phase === 'finished') return;
+ const index = s.ids.indexOf(id);
+ if (watch && index >= 0) {
+  s.spectators.push(id);
+  removeTurn(r,index);
+ } else if (!watch && index < 0 && s.phase === 'lobby' && s.ids.length < 8) {
+  s.spectators = s.spectators.filter(member => member !== id);
+  s.ids.push(id);
+  publish(r);
+ }
 }
 function showRoster(r) {
  const s = r.state, roster = $('roster');
@@ -107,6 +135,21 @@ function showRoster(r) {
   roster.append(row);
  });
  if (editable) roster.append(shuffleButton(s.ids, reorder));
+ if (s.spectators.length) {
+  const heading = document.createElement('h3');
+  heading.textContent = '観戦中';
+  roster.append(heading);
+  for (const id of s.spectators) {
+   const row = document.createElement('div');
+   row.className = 'order-row';
+   const name = document.createElement('span');
+   name.textContent = s.names[id];
+   row.append(name);
+   if (r.host && id !== r.id && s.phase !== 'finished')
+    row.append(orderButton('キック',s.names[id]+'をキック',false,()=>kick(r,id)));
+   roster.append(row);
+  }
+ }
 }
 function relayLaugh(r, sender, turn) {
  const s = r.state;
@@ -114,6 +157,29 @@ function relayLaugh(r, sender, turn) {
  const event = {type:'laugh', turn};
  for (const link of r.links.values()) if (link.open) link.send(event);
  playLaugh();
+}
+function settleVotes(r) {
+ const s = r.state;
+ const voters = s.ids.filter(id => id !== s.ids[s.turn]);
+ s.voted = voters.filter(id => r.ballots.has(id));
+ if (s.voted.length < voters.length) return publish(r);
+ const yes = voters.filter(id => r.ballots.get(id) === true).length;
+ s.results.push({yes, no:voters.length - yes});
+ advance(r, s.results.length === s.ids.length ? 'finished' : 'result');
+}
+function vote(r, id, serial, choice) {
+ const s = r.state;
+ if (s.phase !== 'judge' || s.serial !== serial || typeof choice !== 'boolean' ||
+     !s.ids.includes(id) || id === s.ids[s.turn] || r.ballots.has(id)) return;
+ r.ballots.set(id,choice);
+ settleVotes(r);
+}
+function resultText(result) {
+ if (!result.yes && !result.no) return '判定なし';
+ return result.yes > result.no ? 'オチた！ 成功' : 'オチなかった… 失敗';
+}
+function voteCounts(result) {
+ return 'オチた '+result.yes+'票 ／ オチなかった '+result.no+'票';
 }
 function turnAction(r, type, ok) {
  const s = r.state;
@@ -127,9 +193,7 @@ function turnAction(r, type, ok) {
   advance(r, 'countdown');
  } else if (type === 'finishTalk' && s.phase === 'play') {
   advance(r, 'judge');
- } else if (type === 'judgeTalk' && s.phase === 'judge' && typeof ok === 'boolean') {
-  s.results.push(ok);
-  advance(r, s.results.length === s.ids.length ? 'finished' : 'result');
+
  }
 }
 function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();showRoster(r);
@@ -137,6 +201,8 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  const action=(label,fn)=>{const b=line('button',label);b.className='primary';b.onclick=fn};
 
  const n=s.ids.length, speaker=s.names[s.ids[s.turn % n]];
+ const watching = s.spectators.includes(r.id);
+ if (watching) line('p', 'あなたは観戦中です');
  if(s.phase==='lobby'){
  line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ 1人1トーク');
  const codeToggle = line('button', r.showCode ? 'コードを非表示' : 'コードを表示');
@@ -155,7 +221,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  line('h3','制限時間');const step=line('div','');step.className='stepper';for(const delta of [-10,10]){if(delta>0){const value=document.createElement('span');value.textContent=s.seconds+'秒';step.append(value)}const control=document.createElement('button');control.textContent=delta<0?'−':'＋';control.setAttribute('aria-label',delta<0?'10秒減らす':'10秒増やす');control.disabled=delta<0?s.seconds<=10:s.seconds>=600;control.onclick=()=>{s.seconds=Math.max(10,Math.min(600,s.seconds+delta));publish(r);stage.querySelectorAll('.stepper button')[delta<0?0:1]?.focus()};step.append(control)}
  line('p','開始すると設定が確定します。');if(n>=2)action('全員そろったら開始',()=>advance(r,'ready'))
  }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p','トーク '+(s.turn+1)+' ／ '+speaker+' の番');
- const canAct = r.host || s.ids[s.turn] === r.id;
+ const canAct = !watching && (r.host || s.ids[s.turn] === r.id);
  if (['ready','countdown','play','judge'].includes(s.phase)) {
   line('p', s.prompt[0]);
   line('h2', '「'+s.prompt[1]+'」');
@@ -171,7 +237,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  if (s.phase === 'play') {
   if (r.lastCue !== 'start'+s.serial) { cue('start'); r.lastCue = 'start'+s.serial; }
   r.gauge = makeGauge(stage,s.seconds);
-  if (r.id !== s.ids[s.turn]) {
+  if (!watching && r.id !== s.ids[s.turn]) {
    action('ガヤボタン（笑い声）', () => {
     if (r.host) relayLaugh(r, r.id, s.serial);
     else if (r.uplink?.open) r.uplink.send({type:'laugh', turn:s.serial});
@@ -182,24 +248,61 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  }
  if (s.phase === 'judge') {
   if (r.lastCue !== 'end'+s.serial) { cue('end'); r.lastCue = 'end'+s.serial; }
-  if (canAct) {
-   line('p','トーク終了！ 判定してください。');
-   action('オチた', () => turnAction(r,'judgeTalk',true));
-   action('オチなかった', () => turnAction(r,'judgeTalk',false));
-  } else line('p','トーク終了！ 判定を待っています。');
+  const voted = s.voted.includes(r.id);
+  const eligible = !watching && s.ids[s.turn] !== r.id;
+  line('p','投票済み '+s.voted.length+' / '+(n-1)+'人');
+  if (eligible && !voted) {
+   line('p','オチはついた？ 同票の場合は「オチなかった」です。');
+   const cast = choice => {
+    if (r.host) vote(r,r.id,s.serial,choice);
+    else if (r.uplink?.open) r.uplink.send({type:'vote',turn:s.serial,choice});
+   };
+   action('オチた',()=>cast(true));
+   action('オチなかった',()=>cast(false));
+  } else line('p', voted ? '投票しました。開票をお待ちください。' : '聞き手が投票しています。');
  }
- if(s.phase==='result'){line('h2',s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗');line('p','次は '+s.names[s.ids[(s.turn+1)%n]]+' の番です');if(r.host){action('次の人へ',()=>{s.turn++;advance(r,'ready')})}}
- if(s.phase==='finished'){line('h2','最終結果');line('p','6秒後にロビーへ戻ります。');line('p','最後のトーク：'+(s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗'));s.ids.forEach((_,i)=>{const turns=s.results.filter((v,j)=>j%n===i),wins=turns.filter(Boolean).length;line('p',s.names[s.ids[i]]+'：成功 '+wins+' 回 ／ 失敗 '+(turns.length-wins)+' 回')})}} line('hr','');const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
+ if (s.phase === 'result') {
+  const result = s.results.at(-1);
+  line('p',voteCounts(result));
+  line('h2',resultText(result));
+  line('p','次は '+s.names[s.ids[s.turn+1]]+' の番です');
+  if (r.host) action('次の人へ',()=>{s.turn++;advance(r,'ready')});
+ }
+ if (s.phase === 'finished') {
+  line('h2','最終結果');
+  for (const [index,result] of s.results.entries()) {
+   line('h3',s.names[s.ids[index]]);
+   line('p',voteCounts(result)+' ｜ '+resultText(result));
+  }
+  line('p','6秒後にロビーへ戻ります。');
+ }
+ }
+ line('hr','');
+ if (s.phase !== 'finished' && (!watching || (s.phase==='lobby' && n<8))) {
+  const role = line('button', watching ? 'プレイヤーとして参加' : '観戦する');
+  role.onclick = () => {
+   if (!watching && s.phase!=='lobby' && !confirm('今回のトーク順から外れて観戦しますか？')) return;
+   if (r.host) setSpectating(r,r.id,!watching);
+   else if (r.uplink?.open) r.uplink.send({type:'spectating',watch:!watching});
+  };
+ }
+ const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
 }
 function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)advance(r,'judge')}
 function publish(r){for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
 function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}s.phase=phase;
+ if (phase === 'judge') {
+  r.ballots = new Map();
+  return settleVotes(r);
+ }
  if (phase === 'finished') {
-  setTimeout(() => {
+  clearTimeout(r.returnTimer);
+  r.returnTimer=setTimeout(() => {
    if (session !== r || s.phase !== 'finished') return;
    s.ids = s.ids.filter(id => id === r.id || r.links.has(id));
+   s.spectators = s.spectators.filter(id => id === r.id || r.links.has(id));
    for (const id of Object.keys(s.names)) {
-    if (!s.ids.includes(id)) delete s.names[id];
+    if (!s.ids.includes(id) && !s.spectators.includes(id)) delete s.names[id];
    }
    r.deck = [];
    s.results = [];
@@ -254,7 +357,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   if (r.state || session !== r) return;
   clearTimeout(r.timeout);
   r.id = prefix+code;
-  r.state = {phase:'lobby',seconds:duration,genres:chosen(),ids:[r.id],names:{[r.id]:nickname},turn:0,results:[]};
+  r.state = {phase:'lobby',seconds:duration,genres:chosen(),ids:[r.id],spectators:[],names:{[r.id]:nickname},turn:0,results:[]};
   startClock();
   show(r);
  }
@@ -262,19 +365,26 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   if (r.clock) return;
   let beats=0;r.clock=setInterval(()=>{if(session!==r)return;tick(r);if(++beats%40===0&&r.uplink?.open)r.uplink.send({type:'ping',sent:Date.now()})},125)
  }
- function incoming(c) {if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||s.phase!=='lobby'||s.ids.length>=8){c.send({type:'reject',reason:'満員またはゲーム開始後のため参加できません。'});setTimeout(()=>c.close(),500);return}
+ function incoming(c) {if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||Object.keys(s.names).length>=16){c.send({type:'reject',reason:'ルームが満員です。'});setTimeout(()=>c.close(),500);return}
  const requested = c.metadata?.nickname;
  const name = typeof requested === 'string' ? requested.trim() : '';
- if (!name || name.length > 20 || s.ids.some(id => s.names[id] === name)) {
+ if (!name || name.length > 20 || Object.values(s.names).includes(name)) {
   c.send({type:'reject', reason:'1〜20文字で、参加者と異なるニックネームを入力してください。'});
   setTimeout(() => c.close(), 500);
   return;
  }
  s.names[c.peer] = name;
- r.links.set(c.peer,c);s.ids.push(c.peer);publish(r)});
+ r.links.set(c.peer,c);
+ const group = s.phase==='lobby' && s.ids.length<8 ? s.ids : s.spectators;
+ group.push(c.peer);publish(r)});
  c.on('data',m=>{
   if (session !== r || r.links.get(c.peer) !== c) return;
   const state = r.state;
+  if (m?.type === 'vote') { vote(r,c.peer,m.turn,m.choice); return; }
+  if (m?.type === 'spectating') {
+   setSpectating(r,c.peer,m.watch);
+   return;
+  }
   if (m?.type === 'laugh') {
    relayLaugh(r, c.peer, m.turn);
    return;
@@ -286,7 +396,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
    c.send({type:'pong',sent:m.sent,now:Date.now()});
    if(m.initial) c.send({type:'state',s:r.state,now:Date.now()});
   }});
- const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)}
+ const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.spectators.includes(c.peer)){r.state.spectators=r.state.spectators.filter(id=>id!==c.peer);delete r.state.names[c.peer];publish(r);return}if(r.state.phase==='finished')return;delete r.state.names[c.peer];const index=r.state.ids.indexOf(c.peer);if(index>=0)removeTurn(r,index)};c.on('close',lost);c.on('error',lost)}
  const invitation = new URLSearchParams(location.hash.slice(1)).get('invite');
  if (!host && invitation && code === invitedRoom) {
   waiting('招待リンクの中継サービスに接続中…','中継サービスに接続できませんでした。ホストのロビーを開いたまま再試行してください。',25);
