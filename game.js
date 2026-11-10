@@ -138,7 +138,7 @@ const chosen=()=>Array.from(document.querySelectorAll('#genres input:checked'),e
 $('genres').onchange=()=>{start.disabled=!chosen().length;start.textContent=start.disabled?'ジャンルを1つ以上選んでください':'ひとりで遊ぶ'};
 let pool,deck,last,attempts,wins,secs,timer;
 function screen(html){stage.innerHTML=html;stage.focus()}
-function button(label,fn,primary=true){const b=document.createElement('button');b.textContent=label;if(primary)b.className='primary';(stage.querySelector('.actions')||stage).append(b);b.onclick=fn}
+function button(label,fn,primary=true){const b=document.createElement('button');b.textContent=label;b.className=primary?'primary turn-control':'turn-control';b.disabled=!fn;(stage.querySelector('.actions')||stage).append(b);b.onclick=fn}
 start.onclick=()=>{
  pool = chosen().flatMap(g => bank[g].map(t => ({g,t})));
  deck = [];
@@ -150,11 +150,17 @@ start.onclick=()=>{
  ready();
 };
 const info = () => 'トーク ' + (attempts + 1);
-function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown)}
+function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown);pendingSoloActions()}
+function pendingSoloActions() {
+ button('オチを言い終えた',null);
+ button('オチた',null);
+ button('オチなかった',null,false);
+}
 function startCountdown() {
  screen('<h2>「'+last.t+'」</h2>');
  const startAt = Date.now() + 3000;
  const display = makeCountdown(stage);
+ pendingSoloActions();
  function update() {
   if (!display(startAt - Date.now())) {
    clearInterval(timer);
@@ -180,6 +186,8 @@ function play(startAt) {
   button('オチなかった', () => score(false), false);
  }
  button('オチを言い終えた', finishTalk);
+ button('オチた',null);
+ button('オチなかった',null,false);
  function tick() { if (!gauge(deadline - Date.now())) finishTalk(); }
  timer = setInterval(tick, 150);
  tick();
