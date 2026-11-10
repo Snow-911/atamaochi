@@ -3,7 +3,7 @@
 const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v5-';
 let session;
 function addInviteLink(code) {
- const url = new URL(location.pathname, location.href);
+ const url = new URL('https://snow-911.github.io/atamaochi/');
  url.searchParams.set('room', code);
  const copy = document.createElement('button');
  copy.textContent = '招待リンクをコピー';
@@ -58,7 +58,21 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  line('p','開始すると設定が確定します。');if(n>=2)action('全員そろったら開始',()=>advance(r,'ready'))
  }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p','トーク '+(s.turn+1)+' ／ '+speaker+' の番');
  if(s.phase==='ready'){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');line('p',r.host?'お題を確認したら、トークを始めましょう。':'ホストがトークを開始するまでお待ちください。');if(r.host)action('トーク開始',()=>{s.end=Date.now()+s.seconds*1000;advance(r,'play')})}
- if(['play','judge'].includes(s.phase)){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');if(s.phase==='play'){cue('start');r.gauge=makeGauge(stage,s.seconds);tick(r)}else{cue('end');line('p',r.host?'時間終了！ 判定してください。':'時間終了！ ホストが判定中です。');if(r.host)for(const [label,ok] of [['オチた',true],['オチなかった',false]])action(label,()=>{s.results.push(ok);advance(r,s.results.length===n?'finished':'result')})}}
+ if(['play','judge'].includes(s.phase)){line('p',s.prompt[0]);line('h2','「'+s.prompt[1]+'」');if(s.phase==='play'){cue('start');r.gauge=makeGauge(stage,s.seconds);
+ if (r.host || r.peer.id === s.ids[s.turn]) {
+  const finish = document.createElement('button');
+  finish.className = 'primary';
+  finish.textContent = 'オチを言い終えた';
+  finish.onclick = () => {
+   if (r.host) advance(r, 'judge');
+   else if (r.uplink?.open) {
+    finish.disabled = true;
+    r.uplink.send({type:'finishTalk', turn:s.turn});
+   }
+  };
+  stage.append(finish);
+ }
+ tick(r)}else{cue('end');line('p',r.host?'トーク終了！ 判定してください。':'トーク終了！ ホストが判定中です。');if(r.host)for(const [label,ok] of [['オチた',true],['オチなかった',false]])action(label,()=>{s.results.push(ok);advance(r,s.results.length===n?'finished':'result')})}}
  if(s.phase==='result'){line('h2',s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗');line('p','次は '+s.names[s.ids[(s.turn+1)%n]]+' の番です');if(r.host){action('次の人へ',()=>{s.turn++;advance(r,'ready')})}}
  if(s.phase==='finished'){line('h2','最終結果');line('p','最後のトーク：'+(s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗'));s.ids.forEach((_,i)=>{const turns=s.results.filter((v,j)=>j%n===i),wins=turns.filter(Boolean).length;line('p',s.names[s.ids[i]]+'：成功 '+wins+' 回 ／ 失敗 '+(turns.length-wins)+' 回')})}} line('hr','');const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
 }
@@ -93,12 +107,25 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  }
  s.names[c.peer] = name;
  r.links.set(c.peer,c);s.ids.push(c.peer);publish(r)});
- c.on('data',m=>{if(c.open&&r.links.has(c.peer)&&m?.type==='ping'&&Number.isFinite(m.sent))c.send({type:'pong',sent:m.sent,now:Date.now()})});
+ c.on('data',m=>{
+  if (session !== r || r.links.get(c.peer) !== c) return;
+  const state = r.state;
+  if (m?.type === 'finishTalk' && state.phase === 'play' && m.turn === state.turn && c.peer === state.ids[state.turn]) {
+   advance(r, 'judge');
+   return;
+  }
+  if(c.open&&r.links.has(c.peer)&&m?.type==='ping'&&Number.isFinite(m.sent))c.send({type:'pong',sent:m.sent,now:Date.now()})});
  const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)});
 }
 const invitedRoom = new URLSearchParams(location.search).get('room');
 if (invitedRoom !== null) {
  if (/^\d{6}$/.test(invitedRoom)) {
+  document.body.classList.add('invite-mode');
+  document.querySelector('#online h2').textContent = '招待されたルームに参加';
+  const homeLink = document.createElement('a');
+  homeLink.href = location.pathname;
+  homeLink.textContent = 'トップに戻る';
+  $('online').append(homeLink);
   codeBox.value = invitedRoom;
   notice.textContent = 'ルーム ' + invitedRoom + ' への招待です。ニックネームを入力して「参加する」を押してください。';
   $('nickname').focus();
