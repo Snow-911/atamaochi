@@ -7,9 +7,11 @@ function addInviteLink(code) {
  url.searchParams.set('room', code);
  const copy = document.createElement('button');
  copy.textContent = '招待リンクをコピー';
+ copy.disabled = !!session?.relayPending;
  const status = document.createElement('span');
  status.setAttribute('role', 'status');
  copy.onclick = async () => {
+  if (session?.relay) url.hash = 'invite=' + session.relay.invite;
   try {
    await navigator.clipboard.writeText(url.href);
    status.textContent = ' コピーしました';
@@ -26,12 +28,13 @@ function addInviteLink(code) {
    field.select();
   }
  };
+ if (session && !session.relay && !session.relayPending) status.textContent=' 中継サービスに接続できないため、このリンクは直接接続を使用します。';
  stage.append(copy, status);
 }
-function leave(reason=''){const r=session;if(!r)return;session=null;$('roster').hidden=true;clearInterval(r.clock);clearTimeout(r.timeout);r.peer?.destroy();setup.hidden=false;stage.hidden=true;notice.textContent=reason}
+function leave(reason=''){const r=session;if(!r)return;session=null;$('roster').hidden=true;clearInterval(r.clock);clearTimeout(r.timeout);r.relay?.destroy();r.peer?.destroy?.();setup.hidden=false;stage.hidden=true;notice.textContent=reason}
 function kick(r, id) {
  const s = r.state, index = s.ids.indexOf(id);
- if (!r.host || index < 0 || id === r.peer.id || !confirm(s.names[id] + 'さんを退出させますか？')) return;
+ if (!r.host || index < 0 || id === r.id || !confirm(s.names[id] + 'さんを退出させますか？')) return;
  const connection = r.links.get(id);
  r.links.delete(id);
  if (connection?.open) {
@@ -64,8 +67,42 @@ function showRoster(r) {
   row.className = active ? 'order-row active' : 'order-row';
   label.textContent = (index + 1) + '. ' + s.names[id] + (active ? '（このターン）' : '');
   row.append(label);
-  if (editable) addOrderControls(row, index, s.ids, s.names[id], reorder);
-  if (r.host && id !== r.peer.id && s.phase !== 'finished')
+  row.dataset.member = id;
+  if (editable) {
+   label.classList.add('drag-name');
+   label.textContent = '⠿ ' + label.textContent;
+   label.title = 'ドラッグして順番を変更';
+   let target;
+   label.onpointerdown = event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    label.setPointerCapture(event.pointerId);
+    target = row;
+    row.classList.add('dragging');
+   };
+   label.onpointermove = event => {
+    if (!label.hasPointerCapture(event.pointerId)) return;
+    const over = document.elementFromPoint(event.clientX,event.clientY)?.closest('[data-member]');
+    target?.classList.remove('drop-target');
+    target = roster.contains(over) ? over : null;
+    target?.classList.add('drop-target');
+   };
+   label.onpointerup = event => {
+    if (!label.hasPointerCapture(event.pointerId)) return;
+    const destination = s.ids.indexOf(target?.dataset.member);
+    if (destination < 0 || destination === index) return;
+    const next = s.ids.slice();
+    next.splice(index,1);
+    next.splice(destination,0,id);
+    reorder(next);
+   };
+   label.onlostpointercapture = () => {
+    row.classList.remove('dragging');
+    target?.classList.remove('drop-target');
+    target=null;
+   };
+   addOrderControls(row, index, s.ids, s.names[id], reorder);
+  }
+  if (r.host && id !== r.id && s.phase !== 'finished')
    row.append(orderButton('キック', s.names[id]+'をキック', false, () => kick(r,id)));
   roster.append(row);
  });
@@ -118,7 +155,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  line('h3','制限時間');const step=line('div','');step.className='stepper';for(const delta of [-10,10]){if(delta>0){const value=document.createElement('span');value.textContent=s.seconds+'秒';step.append(value)}const control=document.createElement('button');control.textContent=delta<0?'−':'＋';control.setAttribute('aria-label',delta<0?'10秒減らす':'10秒増やす');control.disabled=delta<0?s.seconds<=10:s.seconds>=600;control.onclick=()=>{s.seconds=Math.max(10,Math.min(600,s.seconds+delta));publish(r);stage.querySelectorAll('.stepper button')[delta<0?0:1]?.focus()};step.append(control)}
  line('p','開始すると設定が確定します。');if(n>=2)action('全員そろったら開始',()=>advance(r,'ready'))
  }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p','トーク '+(s.turn+1)+' ／ '+speaker+' の番');
- const canAct = r.host || s.ids[s.turn] === r.peer.id;
+ const canAct = r.host || s.ids[s.turn] === r.id;
  if (['ready','countdown','play','judge'].includes(s.phase)) {
   line('p', s.prompt[0]);
   line('h2', '「'+s.prompt[1]+'」');
@@ -134,9 +171,9 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  if (s.phase === 'play') {
   if (r.lastCue !== 'start'+s.serial) { cue('start'); r.lastCue = 'start'+s.serial; }
   r.gauge = makeGauge(stage,s.seconds);
-  if (r.peer.id !== s.ids[s.turn]) {
+  if (r.id !== s.ids[s.turn]) {
    action('ガヤボタン（笑い声）', () => {
-    if (r.host) relayLaugh(r, r.peer.id, s.serial);
+    if (r.host) relayLaugh(r, r.id, s.serial);
     else if (r.uplink?.open) r.uplink.send({type:'laugh', turn:s.serial});
    });
   }
@@ -160,7 +197,7 @@ function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial
  if (phase === 'finished') {
   setTimeout(() => {
    if (session !== r || s.phase !== 'finished') return;
-   s.ids = s.ids.filter(id => id === r.peer.id || r.links.has(id));
+   s.ids = s.ids.filter(id => id === r.id || r.links.has(id));
    for (const id of Object.keys(s.names)) {
     if (!s.ids.includes(id)) delete s.names[id];
    }
@@ -207,38 +244,25 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   r.timeout = setTimeout(() => fail(failure), seconds * 1000);
  }
  waiting('接続サービスにアクセス中…','接続サービスに到達できませんでした。通信環境を確認して再試行してください。',15);
- const options = {config:{iceServers:[
-  {urls:['stun:stun.l.google.com:19302','stun:stun.cloudflare.com:3478']},
-  {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'],username:'peerjs',credential:'peerjsp'}
- ]}};
- try { r.peer=host ? new Peer(prefix+code,options) : new Peer(options); }
- catch { fail('通信機能を起動できませんでした。'); return; }
- r.peer.on('error', e => {
-  if (r.host && r.state && ['peer-unavailable','network'].includes(e.type)) return;
-  const messages = {
-   'unavailable-id':'ルームコードが重なりました。もう一度作成してください。',
-   'peer-unavailable':'ルームが見つかりません。ホストがロビーを開いているか、最新の招待リンクかを確認してください。',
-   'network':'接続サービスとの通信に失敗しました。通信環境を確認して再試行してください。'
-  };
-  fail(messages[e.type] || 'オンライン接続に失敗しました。通信環境を確認して再試行してください。');
- });
- r.peer.on('disconnected', () => {
-  if (session === r && r.host && r.state && !r.peer.destroyed) {
-   setTimeout(() => {
-    if (session === r && r.peer.disconnected && !r.peer.destroyed) r.peer.reconnect();
-   }, 1200);
-  }
- });
- r.peer.on('open',()=>{if(session!==r)return;
- if(host){if(r.state)return;clearTimeout(r.timeout);r.state={phase:'lobby',seconds:duration,genres:chosen(),ids:[r.peer.id],names:{[r.peer.id]:nickname},turn:0,results:[]};show(r)}
- else{
- waiting('ホストに接続中…','ホストとの通信経路を確立できませんでした。ホストのロビーを開いたまま、Wi-Fiとモバイル通信を切り替えて再試行してください。',18);
- const c=r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}});c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>{
+ function wireGuest(c) {
+ c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>{
   if(!r.state) waiting('入室情報を受信中…','ホストから入室情報が届きませんでした。ホストの画面を開いて再試行してください。',10);
   c.send({type:'ping',sent:Date.now(),initial:!r.state});
- });c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c}
- let beats=0;r.clock=setInterval(()=>{if(session!==r)return;tick(r);if(++beats%40===0&&r.uplink?.open)r.uplink.send({type:'ping',sent:Date.now()})},125)});
- r.peer.on('connection',c=>{if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||s.phase!=='lobby'||s.ids.length>=8){c.send({type:'reject',reason:'満員またはゲーム開始後のため参加できません。'});setTimeout(()=>c.close(),500);return}
+ });c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c;
+ }
+ function openLobby() {
+  if (r.state || session !== r) return;
+  clearTimeout(r.timeout);
+  r.id = prefix+code;
+  r.state = {phase:'lobby',seconds:duration,genres:chosen(),ids:[r.id],names:{[r.id]:nickname},turn:0,results:[]};
+  startClock();
+  show(r);
+ }
+ function startClock() {
+  if (r.clock) return;
+  let beats=0;r.clock=setInterval(()=>{if(session!==r)return;tick(r);if(++beats%40===0&&r.uplink?.open)r.uplink.send({type:'ping',sent:Date.now()})},125)
+ }
+ function incoming(c) {if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||s.phase!=='lobby'||s.ids.length>=8){c.send({type:'reject',reason:'満員またはゲーム開始後のため参加できません。'});setTimeout(()=>c.close(),500);return}
  const requested = c.metadata?.nickname;
  const name = typeof requested === 'string' ? requested.trim() : '';
  if (!name || name.length > 20 || s.ids.some(id => s.names[id] === name)) {
@@ -262,7 +286,68 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
    c.send({type:'pong',sent:m.sent,now:Date.now()});
    if(m.initial) c.send({type:'state',s:r.state,now:Date.now()});
   }});
- const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)});
+ const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)}
+ const invitation = new URLSearchParams(location.hash.slice(1)).get('invite');
+ if (!host && invitation && code === invitedRoom) {
+  waiting('招待リンクの中継サービスに接続中…','中継サービスに接続できませんでした。ホストのロビーを開いたまま再試行してください。',25);
+  InviteRelay.create(false,invitation,()=>{},()=>fail('中継サービスとの接続が切れました。'))
+   .then(async relay => {
+    if(session!==r){relay.destroy();return;}
+    r.relay=relay;
+    r.id=relay.id;
+    const link=await relay.connect(nickname);
+    wireGuest(link);
+    startClock();
+   }).catch(()=>fail('招待リンクの中継サービスに接続できませんでした。新しいリンクで再試行してください。'));
+  return;
+ }
+ if (host) {
+  r.relayPending=true;
+  InviteRelay.create(true,null,incoming,()=>{
+   if(session!==r)return;
+   for(const c of [...r.links.values()]) if(c.peer.startsWith('relay-')) c.closeLink();
+   r.relay?.destroy();r.relay=null;
+   if(session===r && r.state?.phase==='lobby')show(r);
+  }).then(relay=>{
+   if(session!==r){relay.destroy();return;}
+   r.relay=relay;
+   openLobby();
+  }).catch(()=>{}).finally(()=>{
+   r.relayPending=false;
+   if(session===r && r.state?.phase==='lobby')show(r);
+  });
+ }
+ const options = {config:{iceServers:[
+  {urls:['stun:stun.l.google.com:19302','stun:stun.cloudflare.com:3478']},
+  {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'],username:'peerjs',credential:'peerjsp'}
+ ]}};
+ try { r.peer=host ? new Peer(prefix+code,options) : new Peer(options); }
+ catch { if(!host)fail('通信機能を起動できませんでした。'); return; }
+ r.peer.on('error', e => {
+  if (host && (r.relayPending || r.relay) && e.type !== 'unavailable-id') return;
+  if (r.host && r.state && ['peer-unavailable','network'].includes(e.type)) return;
+  const messages = {
+   'unavailable-id':'ルームコードが重なりました。もう一度作成してください。',
+   'peer-unavailable':'ルームが見つかりません。ホストがロビーを開いているか、最新の招待リンクかを確認してください。',
+   'network':'接続サービスとの通信に失敗しました。通信環境を確認して再試行してください。'
+  };
+  fail(messages[e.type] || 'オンライン接続に失敗しました。通信環境を確認して再試行してください。');
+ });
+ r.peer.on('disconnected', () => {
+  if (session === r && r.host && r.state && !r.peer.destroyed) {
+   setTimeout(() => {
+    if (session === r && r.peer.disconnected && !r.peer.destroyed) r.peer.reconnect();
+   }, 1200);
+  }
+ });
+ r.peer.on('open',()=>{if(session!==r)return;
+ if(host){openLobby();return;}
+ else{
+ r.id=r.peer.id;
+ waiting('ホストに接続中…','ホストとの通信経路を確立できませんでした。ホストのロビーを開いたまま、Wi-Fiとモバイル通信を切り替えて再試行してください。',18);
+ wireGuest(r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}}));}
+ startClock();});
+ r.peer.on('connection',incoming);
 }
 const invitedRoom = new URLSearchParams(location.search).get('room');
 if (invitedRoom !== null) {
