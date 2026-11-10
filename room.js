@@ -2,6 +2,32 @@
 (()=>{
 const codeBox=$('roomCode'),notice=$('roomNotice'),prefix='atamaochi-v5-';
 let session;
+function addInviteLink(code) {
+ const url = new URL(location.pathname, location.href);
+ url.searchParams.set('room', code);
+ const copy = document.createElement('button');
+ copy.textContent = '招待リンクをコピー';
+ const status = document.createElement('span');
+ status.setAttribute('role', 'status');
+ copy.onclick = async () => {
+  try {
+   await navigator.clipboard.writeText(url.href);
+   status.textContent = ' コピーしました';
+  } catch {
+   status.replaceChildren();
+   const label = document.createElement('label');
+   label.textContent = ' リンクを選択してコピーしてください ';
+   const field = document.createElement('input');
+   field.readOnly = true;
+   field.value = url.href;
+   label.append(field);
+   status.append(label);
+   field.focus();
+   field.select();
+  }
+ };
+ stage.append(copy, status);
+}
 function leave(reason=''){const r=session;if(!r)return;session=null;clearInterval(r.clock);clearTimeout(r.timeout);r.peer?.destroy();setup.hidden=false;stage.hidden=true;notice.textContent=reason}
 function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  const line=(tag,str)=>{const el=document.createElement(tag);el.textContent=str;stage.append(el);return el};
@@ -10,6 +36,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();
  const n=s.ids.length, speaker=s.names[s.ids[s.turn % n]];
  if(s.phase==='lobby'){
  line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ 1人1トーク');
+ addInviteLink(r.code);
  line('p', 'トーク順：' + s.ids.map(id => s.names[id]).join(' → '));
  if(r.host){
  line('h3','ルーム設定');line('p','お題のジャンル（1つ以上）');const grid=line('div','');grid.className='grid';
@@ -55,6 +82,17 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  r.links.set(c.peer,c);s.ids.push(c.peer);publish(r)});
  c.on('data',m=>{if(c.open&&r.links.has(c.peer)&&m?.type==='ping'&&Number.isFinite(m.sent))c.send({type:'pong',sent:m.sent,now:Date.now()})});
  const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)});
+}
+const invitedRoom = new URLSearchParams(location.search).get('room');
+if (invitedRoom !== null) {
+ if (/^\d{6}$/.test(invitedRoom)) {
+  codeBox.value = invitedRoom;
+  notice.textContent = 'ルーム ' + invitedRoom + ' への招待です。ニックネームを入力して「参加する」を押してください。';
+  $('nickname').focus();
+ } else {
+  notice.textContent = '招待リンクのコードが正しくありません。6桁のルームコードを入力してください。';
+  codeBox.focus();
+ }
 }
 $('createRoom').onclick=()=>begin(true);$('joinRoom').onclick=()=>begin(false);
 })();
