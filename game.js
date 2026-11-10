@@ -97,17 +97,6 @@ R18: [
 ]};
 const $=id=>document.getElementById(id);const setup=$('setup'),stage=$('stage'),start=$('start');
 Object.keys(bank).forEach((g,i)=>$('genres').insertAdjacentHTML('beforeend','<label class="tile"><input type="checkbox" value="'+g+'" '+(i<6?'checked':'')+'>'+g+'</label>'));
-for (const [genre, prompts] of Object.entries(bank)) {
- const heading = document.createElement('h3');
- heading.textContent = genre;
- const list = document.createElement('ul');
- for (const prompt of prompts) {
-  const item = document.createElement('li');
-  item.textContent = prompt;
-  list.append(item);
- }
- $('topics').append(heading, list);
-}
 function orderButton(text, description, disabled, click) {
  const button = document.createElement('button');
  button.type = 'button';
