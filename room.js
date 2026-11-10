@@ -75,7 +75,7 @@ function setSpectating(r, id, watch) {
  if (watch && index >= 0) {
   s.spectators.push(id);
   removeTurn(r,index);
- } else if (!watch && index < 0 && s.phase === 'lobby' && s.ids.length < 8) {
+ } else if (!watch && index < 0 && s.phase === 'lobby' && s.ids.length < (s.capacity || 8)) {
   s.spectators = s.spectators.filter(member => member !== id);
   s.ids.push(id);
   publish(r);
@@ -169,7 +169,7 @@ function settleVotes(r) {
  if (s.voted.length < voters.length) return publish(r);
  const yes = voters.filter(id => r.ballots.get(id) === true).length;
  s.results.push({yes, no:voters.length - yes});
- advance(r, s.results.length === s.ids.length ? 'finished' : 'result');
+ advance(r, s.mode === 'team' || s.results.length === s.ids.length ? 'finished' : 'result');
 }
 function vote(r, id, serial, choice) {
  const s = r.state;
@@ -236,7 +236,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  const watching = s.spectators.includes(r.id);
  if (watching) line('p', 'あなたは観戦中です');
  if(s.phase==='lobby'){
- line('h2','参加者を待っています');line('p',n+' / 8人参加中 ｜ 1人1トーク');
+ line('h2','参加者を待っています');line('p',n+' / '+(s.capacity || 8)+'人参加中 ｜ '+modes[s.mode || 'normal'][0]);
  const codeToggle = line('button', r.showCode ? 'コードを非表示' : 'コードを表示');
  const codeText = line('span', '');
  function renderCode() {
@@ -248,11 +248,24 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  renderCode();
  addInviteLink(r.code);
  if(r.host){
- line('h3','ルーム設定');line('p','お題のジャンル（1つ以上）');const grid=line('div','');grid.className='grid';
+ line('h3','ルーム設定');
+ const modeLabel = line('label','モード ');
+ const modeSelect = document.createElement('select');
+ fillModes(modeSelect,s.mode || 'normal');
+ modeLabel.append(modeSelect);
+ modeSelect.onchange = () => { s.mode = modeSelect.value; publish(r); };
+ line('p',modes[s.mode || 'normal'][1]);
+ const capacityLabel = line('label','プレイヤーの上限（観戦者を除く） ');
+ const capacitySelect = document.createElement('select');
+ for (let limit = Math.max(2,n); limit <= 8; limit++) capacitySelect.add(new Option(limit+'人',limit));
+ capacitySelect.value = s.capacity || 8;
+ capacityLabel.append(capacitySelect);
+ capacitySelect.onchange = () => { s.capacity = Number(capacitySelect.value); publish(r); };
+ line('p','お題のジャンル（1つ以上）');const grid=line('div','');grid.className='grid';
  for(const g of Object.keys(bank)){const label=document.createElement('label'),input=document.createElement('input');label.className='tile';input.type='checkbox';input.checked=s.genres.includes(g);input.disabled=input.checked&&s.genres.length===1;input.onchange=()=>{s.genres=Object.keys(bank).filter(x=>x===g?input.checked:s.genres.includes(x));publish(r);stage.querySelectorAll('.tile input')[Object.keys(bank).indexOf(g)]?.focus()};label.append(input,document.createTextNode(g));grid.append(label)}
  line('h3','制限時間');const step=line('div','');step.className='stepper';for(const delta of [-10,10]){if(delta>0){const value=document.createElement('span');value.textContent=s.seconds+'秒';step.append(value)}const control=document.createElement('button');control.textContent=delta<0?'−':'＋';control.setAttribute('aria-label',delta<0?'10秒減らす':'10秒増やす');control.disabled=delta<0?s.seconds<=10:s.seconds>=600;control.onclick=()=>{s.seconds=Math.max(10,Math.min(600,s.seconds+delta));publish(r);stage.querySelectorAll('.stepper button')[delta<0?0:1]?.focus()};step.append(control)}
  line('p','開始すると設定が確定します。');action('全員そろったら開始',()=>advance(r,'ready'),n>=2)
- }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p','トーク '+(s.turn+1)+' ／ '+speaker+' の番');
+ }else{line('p','制限時間：'+s.seconds+'秒');line('p','ジャンル：'+s.genres.join('・'));line('p','ホストが設定を変更すると、この画面にも反映されます。')}} else{if(s.phase!=='finished')line('p',modes[s.mode || 'normal'][0]+' ｜ '+modes[s.mode || 'normal'][1]);if(s.phase!=='finished')line('p',s.mode==='team'?'全員でトーク ／ 進行：'+speaker:'トーク '+(s.turn+1)+' ／ '+speaker+' の番');
  const canAct = !watching && (r.host || s.ids[s.turn] === r.id);
  if (['ready','countdown','play','judge'].includes(s.phase)) {
   line('p', s.prompt[0]);
@@ -268,7 +281,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  if (s.phase === 'play') {
   if (r.lastCue !== 'start'+s.serial) { cue('start'); r.lastCue = 'start'+s.serial; }
   r.gauge = makeGauge(stage,s.seconds);
-  if (!watching && r.id !== s.ids[s.turn]) {
+  if (s.mode !== 'team' && !watching && r.id !== s.ids[s.turn]) {
    action('ガヤボタン（笑い声）', () => {
     if (r.host) relayLaugh(r, r.id, s.serial);
     else if (r.uplink?.open) r.uplink.send({type:'laugh', turn:s.serial});
@@ -314,13 +327,13 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
   action('オチた',null,false);
   action('オチなかった',null,false);
  }
- if (s.phase!=='finished' && s.ids[s.turn+1] && (!watching || r.host)) {
+ if (s.mode!=='team' && s.phase!=='finished' && s.ids[s.turn+1] && (!watching || r.host)) {
   action('次の人へ', () => turnAction(r,'nextTalk'), s.phase==='result' && mayAdvance(r,r.id));
  }
  if (s.phase === 'finished') {
   line('h2','最終結果');
   for (const [index,result] of s.results.entries()) {
-   line('h3',s.names[s.ids[index]]);
+   line('h3',s.mode === 'team' ? 'チーム全員' : s.names[s.ids[index]]);
    showBallot(stage,result);
    line('p',resultText(result)).className='result-line';
   }
@@ -333,7 +346,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
   revealVerdict(stage,tally.yes > tally.no);
  }
  line('hr','');
- if (s.phase !== 'finished' && (!watching || (s.phase==='lobby' && n<8))) {
+ if (s.phase !== 'finished' && (!watching || (s.phase==='lobby' && n<(s.capacity || 8)))) {
   const role = line('button', watching ? 'プレイヤーとして参加' : '観戦する');
   role.onclick = () => {
    if (!watching && s.phase!=='lobby' && !confirm('今回のトーク順から外れて観戦しますか？')) return;
@@ -345,7 +358,7 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
 }
 function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)advance(r,'judge')}
 function publish(r){r.state.revision=(r.state.revision || 0)+1;for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
-function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}s.phase=phase;
+function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(s.mode !== 'team' || !s.prompt || s.phase === 'lobby'){if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}}s.phase=phase;
  if (phase === 'judge') {
   r.ballots = new Map();
   return settleVotes(r);
@@ -412,7 +425,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   if (r.state || session !== r) return;
   clearTimeout(r.timeout);
   r.id = prefix+code;
-  r.state = {phase:'lobby',seconds:duration,genres:chosen(),ids:[r.id],spectators:[],names:{[r.id]:nickname},turn:0,results:[]};
+  r.state = {phase:'lobby',mode:$('mode').value,capacity:8,seconds:duration,genres:chosen(),ids:[r.id],spectators:[],names:{[r.id]:nickname},turn:0,results:[]};
   startClock();
   show(r);
  }
@@ -430,7 +443,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  }
  s.names[c.peer] = name;
  r.links.set(c.peer,c);
- const group = s.phase==='lobby' && s.ids.length<8 ? s.ids : s.spectators;
+ const group = s.phase==='lobby' && s.ids.length<(s.capacity || 8) ? s.ids : s.spectators;
  group.push(c.peer);publish(r)});
  c.on('data',m=>{
   if (session !== r || r.links.get(c.peer) !== c) return;

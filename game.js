@@ -130,12 +130,30 @@ function shuffleButton(order, update) {
   update(next);
  });
 }
+const modes = {
+ normal: ['ジュンバンオチ','一人ずつ、自分のお題にオチをつけよう。'],
+ quick: ['ソクオチ','お題に続く一文でオチをつけよう。'],
+ team: ['ナカマオチ','全員で一つの話をつないで、オチをつけよう。先頭の人がトークを開始します。']
+};
+function fillModes(select, selected) {
+ for (const [value,[name]] of Object.entries(modes)) select.add(new Option(name,value));
+ select.value = selected;
+}
+fillModes($('mode'),'normal');
+function syncMode() {
+ const mode = $('mode').value;
+ $('modeHint').textContent = modes[mode][1];
+ start.disabled = mode === 'team' || !chosen().length;
+ start.textContent = mode === 'team' ? 'ナカマオチはルームで遊べます' : chosen().length ? 'ひとりで遊ぶ' : 'ジャンルを1つ以上選んでください';
+}
+$('mode').onchange = syncMode;
 let duration=60;
 function adjust(n){duration=Math.max(10,Math.min(600,duration+n));$('sec').textContent=duration+'秒';$('less').disabled=duration===10;$('more').disabled=duration===600}
 $('less').onclick=()=>adjust(-10);$('more').onclick=()=>adjust(10);
 
 const chosen=()=>Array.from(document.querySelectorAll('#genres input:checked'),e=>e.value);
-$('genres').onchange=()=>{start.disabled=!chosen().length;start.textContent=start.disabled?'ジャンルを1つ以上選んでください':'ひとりで遊ぶ'};
+$('genres').onchange = syncMode;
+syncMode();
 let pool,deck,last,attempts,wins,secs,timer;
 function screen(html){stage.innerHTML=html;stage.focus()}
 function button(label,fn,primary=true){const b=document.createElement('button');b.textContent=label;b.className=primary?'primary turn-control':'turn-control';b.disabled=!fn;(stage.querySelector('.actions')||stage).append(b);b.onclick=fn}
@@ -149,8 +167,8 @@ start.onclick=()=>{
  stage.hidden = false;
  ready();
 };
-const info = () => 'トーク ' + (attempts + 1);
-function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>お題を確認したら、トークを始めましょう。</p>');button('トーク開始',startCountdown);pendingSoloActions()}
+const info = () => modes[$('mode').value][0] + ' ／ トーク ' + (attempts + 1);
+function ready(){if(!deck.length){deck=[...pool];for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}if(deck.at(-1)===last)deck.reverse()}last=deck.pop();screen('<p>'+info()+' ／ '+last.g+'</p><h2>「'+last.t+'」</h2><p>'+modes[$('mode').value][1]+'</p>');button('トーク開始',startCountdown);pendingSoloActions()}
 function pendingSoloActions() {
  button('オチを言い終えた',null);
  button('オチた',null);
