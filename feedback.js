@@ -93,3 +93,24 @@ function playLaugh() {
  voice.start(start);
  voice.stop(start + 0.68);
 }
+
+function revealVerdict(container, success) {
+ const title = container.querySelector('.verdict') || container.querySelector('h2');
+ title?.classList.add('verdict');
+ if (!success || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+ const layer = document.createElement('div');
+ layer.className = 'confetti';
+ layer.setAttribute('aria-hidden','true');
+ const colors = ['#ffcc16','#ff5849','#805ce7','#27c6b5'];
+ for (let i = 0; i < 36; i++) {
+  const piece = document.createElement('i');
+  piece.style.left = Math.random()*100+'%';
+  piece.style.backgroundColor = colors[i % colors.length];
+  piece.style.setProperty('--drift',(Math.random()-.5)*120+'px');
+  piece.style.setProperty('--spin',(Math.random()-.5)*800+'deg');
+  piece.style.animationDelay = Math.random()*.35+'s';
+  layer.append(piece);
+ }
+ container.append(layer);
+ setTimeout(()=>layer.remove(),2100);
+}

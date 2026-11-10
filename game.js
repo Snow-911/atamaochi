@@ -188,6 +188,7 @@ function score(ok) {
  attempts++;
  if (ok) wins++;
  screen('<h2>'+(ok?'オチた！ 成功':'オチなかった… 失敗')+'</h2><p>成功 '+wins+' 回 ／ 失敗 '+(attempts-wins)+' 回</p><div class="actions"></div>');
+ revealVerdict(stage,ok);
  button('もう一度', ready);
  button('ロビーに戻る', () => {
   stage.hidden = true;

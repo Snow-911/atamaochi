@@ -44,6 +44,7 @@ function kick(r, id) {
  delete s.names[id];
  if (index < 0) {
   s.spectators = s.spectators.filter(member => member !== id);
+  if (s.phase === 'judge') return settleVotes(r);
   return publish(r);
  }
  removeTurn(r, index);
@@ -158,9 +159,12 @@ function relayLaugh(r, sender, turn) {
  for (const link of r.links.values()) if (link.open) link.send(event);
  playLaugh();
 }
+function eligibleVoters(s) {
+ return [...s.ids.filter(id => id !== s.ids[s.turn]), ...s.spectators];
+}
 function settleVotes(r) {
  const s = r.state;
- const voters = s.ids.filter(id => id !== s.ids[s.turn]);
+ const voters = eligibleVoters(s);
  s.voted = voters.filter(id => r.ballots.has(id));
  if (s.voted.length < voters.length) return publish(r);
  const yes = voters.filter(id => r.ballots.get(id) === true).length;
@@ -170,7 +174,7 @@ function settleVotes(r) {
 function vote(r, id, serial, choice) {
  const s = r.state;
  if (s.phase !== 'judge' || s.serial !== serial || typeof choice !== 'boolean' ||
-     !s.ids.includes(id) || id === s.ids[s.turn] || r.ballots.has(id)) return;
+     !eligibleVoters(s).includes(id) || r.ballots.has(id)) return;
  r.ballots.set(id,choice);
  settleVotes(r);
 }
@@ -178,8 +182,24 @@ function resultText(result) {
  if (!result.yes && !result.no) return '判定なし';
  return result.yes > result.no ? 'オチた！ 成功' : 'オチなかった… 失敗';
 }
-function voteCounts(result) {
- return 'オチた '+result.yes+'票 ／ オチなかった '+result.no+'票';
+function showBallot(container, {yes,no}) {
+ const card = document.createElement('div');
+ card.className = 'ballot';
+ for (const [label,count] of [['オチた',yes],['オチなかった',no]]) {
+  const cell = document.createElement('div');
+  cell.append(label+' ');
+  const value = document.createElement('strong');
+  value.textContent = count+'票';
+  cell.append(value);
+  card.append(cell);
+ }
+ const bar = document.createElement('div');
+ bar.className = 'ballot-bar';
+ const fill = document.createElement('i');
+ fill.style.width = (yes+no ? 100*yes/(yes+no) : 0)+'%';
+ bar.append(fill);
+ card.append(bar);
+ container.append(card);
 }
 function turnAction(r, type, ok) {
  const s = r.state;
@@ -249,8 +269,9 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  if (s.phase === 'judge') {
   if (r.lastCue !== 'end'+s.serial) { cue('end'); r.lastCue = 'end'+s.serial; }
   const voted = s.voted.includes(r.id);
-  const eligible = !watching && s.ids[s.turn] !== r.id;
-  line('p','投票済み '+s.voted.length+' / '+(n-1)+'人');
+  const voters = eligibleVoters(s);
+  const eligible = voters.includes(r.id);
+  line('p','投票済み '+s.voted.length+' / '+voters.length+'人');
   if (eligible && !voted) {
    line('p','オチはついた？ 同票の場合は「オチなかった」です。');
    const cast = choice => {
@@ -263,8 +284,8 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  }
  if (s.phase === 'result') {
   const result = s.results.at(-1);
-  line('p',voteCounts(result));
-  line('h2',resultText(result));
+  showBallot(stage,result);
+  line('h2',resultText(result)).className='verdict';
   line('p','次は '+s.names[s.ids[s.turn+1]]+' の番です');
   if (r.host) action('次の人へ',()=>{s.turn++;advance(r,'ready')});
  }
@@ -272,10 +293,16 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
   line('h2','最終結果');
   for (const [index,result] of s.results.entries()) {
    line('h3',s.names[s.ids[index]]);
-   line('p',voteCounts(result)+' ｜ '+resultText(result));
+   showBallot(stage,result);
+   line('p',resultText(result)).className='result-line';
   }
   line('p','6秒後にロビーへ戻ります。');
  }
+ }
+ if (['result','finished'].includes(s.phase) && r.reveal !== s.serial) {
+  r.reveal = s.serial;
+  const tally = s.results.at(-1);
+  revealVerdict(stage,tally.yes > tally.no);
  }
  line('hr','');
  if (s.phase !== 'finished' && (!watching || (s.phase==='lobby' && n<8))) {
@@ -396,7 +423,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
    c.send({type:'pong',sent:m.sent,now:Date.now()});
    if(m.initial) c.send({type:'state',s:r.state,now:Date.now()});
   }});
- const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.spectators.includes(c.peer)){r.state.spectators=r.state.spectators.filter(id=>id!==c.peer);delete r.state.names[c.peer];publish(r);return}if(r.state.phase==='finished')return;delete r.state.names[c.peer];const index=r.state.ids.indexOf(c.peer);if(index>=0)removeTurn(r,index)};c.on('close',lost);c.on('error',lost)}
+ const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.spectators.includes(c.peer)){r.state.spectators=r.state.spectators.filter(id=>id!==c.peer);delete r.state.names[c.peer];if(r.state.phase==='judge')settleVotes(r);else publish(r);return}if(r.state.phase==='finished')return;delete r.state.names[c.peer];const index=r.state.ids.indexOf(c.peer);if(index>=0)removeTurn(r,index)};c.on('close',lost);c.on('error',lost)}
  const invitation = new URLSearchParams(location.hash.slice(1)).get('invite');
  if (!host && invitation && code === invitedRoom) {
   waiting('招待リンクの中継サービスに接続中…','中継サービスに接続できませんでした。ホストのロビーを開いたまま再試行してください。',25);
