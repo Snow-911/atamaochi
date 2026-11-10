@@ -139,11 +139,28 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
   } else line('p','トーク終了！ 判定を待っています。');
  }
  if(s.phase==='result'){line('h2',s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗');line('p','次は '+s.names[s.ids[(s.turn+1)%n]]+' の番です');if(r.host){action('次の人へ',()=>{s.turn++;advance(r,'ready')})}}
- if(s.phase==='finished'){line('h2','最終結果');line('p','最後のトーク：'+(s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗'));s.ids.forEach((_,i)=>{const turns=s.results.filter((v,j)=>j%n===i),wins=turns.filter(Boolean).length;line('p',s.names[s.ids[i]]+'：成功 '+wins+' 回 ／ 失敗 '+(turns.length-wins)+' 回')})}} line('hr','');const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
+ if(s.phase==='finished'){line('h2','最終結果');line('p','6秒後にロビーへ戻ります。');line('p','最後のトーク：'+(s.results.at(-1)?'オチた！ 成功':'オチなかった… 失敗'));s.ids.forEach((_,i)=>{const turns=s.results.filter((v,j)=>j%n===i),wins=turns.filter(Boolean).length;line('p',s.names[s.ids[i]]+'：成功 '+wins+' 回 ／ 失敗 '+(turns.length-wins)+' 回')})}} line('hr','');const b=line('button',r.host?'ルームを閉じる':'退出する');b.onclick=()=>{if(confirm(r.host?'全員のルームを終了しますか？':'ルームを退出しますか？'))leave()};
 }
 function tick(r){const s=r.state;if(s?.phase==='countdown'){if(!r.countdown(s.startAt-Date.now()-r.offset)&&r.host)advance(r,'play');return}if(s?.phase!=='play')return;const left=r.gauge(s.end-Date.now()-r.offset);if(!left&&r.host)advance(r,'judge')}
 function publish(r){for(const c of r.links.values())if(c.open)c.send({type:'state',s:r.state,now:Date.now()});show(r)}
-function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}s.phase=phase;publish(r)}
+function advance(r,phase){const s=r.state;if(phase==='ready'){s.serial=(s.serial||0)+1;if(!r.deck.length)r.deck=s.genres.flatMap(g=>bank[g].map(t=>[g,t]));s.prompt=r.deck.splice(Math.floor(Math.random()*r.deck.length),1)[0]}s.phase=phase;
+ if (phase === 'finished') {
+  setTimeout(() => {
+   if (session !== r || s.phase !== 'finished') return;
+   s.ids = s.ids.filter(id => id === r.peer.id || r.links.has(id));
+   for (const id of Object.keys(s.names)) {
+    if (!s.ids.includes(id)) delete s.names[id];
+   }
+   r.deck = [];
+   s.results = [];
+   s.turn = 0;
+   s.prompt = null;
+   s.end = 0;
+   s.startAt = 0;
+   advance(r, 'lobby');
+  }, 6000);
+ }
+ publish(r)}
 function begin(host){if(session)return;const code=host?String(crypto.getRandomValues(new Uint32Array(1))[0]%1000000).padStart(6,'0'):codeBox.value.trim();
  if(!/^\d{6}$/.test(code)){notice.textContent='6桁のコードを入力してください。';return}
  if(host&&!chosen().length){notice.textContent='ジャンルを選んでください。';return}
@@ -200,6 +217,7 @@ if (invitedRoom !== null) {
 }
 $('createRoom').onclick=()=>begin(true);$('joinRoom').onclick=()=>begin(false);
 })();
+
 
 
 
