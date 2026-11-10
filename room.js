@@ -161,9 +161,10 @@ function showRoster(r) {
 function relayLaugh(r, sender, turn) {
  const s = r.state;
  if (s.phase !== 'play' || turn !== s.serial || !s.ids.includes(sender) || sender === s.ids[s.turn]) return;
- const event = {type:'laugh', turn};
+ r.lastLaugh = chooseLaugh(r.lastLaugh);
+ const event = {type:'laugh', turn, clip:r.lastLaugh};
  for (const link of r.links.values()) if (link.open) link.send(event);
- playLaugh();
+ playLaugh(event.clip);
 }
 function eligibleVoters(s) {
  const players = s.mode === 'team' ? s.ids : s.ids.filter(id => id !== s.ids[s.turn]);
@@ -238,7 +239,7 @@ function turnAction(r, type, ok, sender = r.id) {
 
  }
 }
-function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();showRoster(r);
+function show(r){if(session!==r)return;const s=r.state;stage.dataset.phase=s.phase;stage.replaceChildren();showRoster(r);
  const line=(tag,str)=>{const el=document.createElement(tag);el.textContent=str;stage.append(el);return el};
  const action = (label, fn, enabled = true) => {
   const b = line('button',label);
@@ -415,6 +416,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   return;
  }
  const r=session={host,code,hostId:prefix+code,links:new Map(),deck:[],offset:0};
+ delete stage.dataset.phase;
  setup.hidden=true;
  stage.hidden=false;
  screen('<h2>オンラインに接続しています</h2><p role="status" id="connectionStatus"></p>');
@@ -439,7 +441,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  }
  waiting('接続サービスにアクセス中…','接続サービスに到達できませんでした。通信環境を確認して再試行してください。',15);
  function wireGuest(c) {
- c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state' || (r.state?.revision ?? -1) > (m.s.revision ?? 0))return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>{
+ c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh(m.clip);return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state' || (r.state?.revision ?? -1) > (m.s.revision ?? 0))return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>{
   if(!r.state) waiting('入室情報を受信中…','ホストから入室情報が届きませんでした。ホストの画面を開いて再試行してください。',10);
   c.send({type:'ping',sent:Date.now(),initial:!r.state});
  });c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c;

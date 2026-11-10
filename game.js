@@ -163,6 +163,7 @@ start.onclick=()=>{
  last = null;
  attempts = wins = 0;
  secs = duration;
+ delete stage.dataset.phase;
  setup.hidden = true;
  stage.hidden = false;
  ready();
