@@ -183,14 +183,60 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   $('nickname').focus();
   return;
  }
- const r=session={host,code,links:new Map(),deck:[],offset:0};setup.hidden=true;stage.hidden=false;screen('<h2>ルームに接続中…</h2>');button('キャンセル',()=>leave());
- const fail=msg=>{if(session===r)leave(msg)};
- r.timeout=setTimeout(()=>fail('接続できませんでした。コードと通信環境を確認してください。'),20000);
- try{r.peer=host?new Peer(prefix+code):new Peer()}catch{fail('通信機能を起動できませんでした。');return}
- r.peer.on('error',e=>fail(e.type==='unavailable-id'?'コードが重なりました。もう一度作成してください。':'接続できませんでした。ホストの画面とルームコードを確認してください。'));
+ const r=session={host,code,links:new Map(),deck:[],offset:0};
+ setup.hidden=true;
+ stage.hidden=false;
+ screen('<h2>オンラインに接続しています</h2><p role="status" id="connectionStatus"></p>');
+ button('キャンセル',()=>leave());
+ const fail = msg => {
+  if(session!==r) return;
+  const joining = !r.state;
+  leave(msg);
+  if (joining) {
+   const retry = document.createElement('button');
+   retry.textContent = 'もう一度接続する';
+   retry.onclick = () => begin(host);
+   notice.append(document.createElement('br'), retry);
+   retry.focus();
+  }
+ };
+ function waiting(description, failure, seconds) {
+  const status = $('connectionStatus');
+  if (status) status.textContent = description;
+  clearTimeout(r.timeout);
+  r.timeout = setTimeout(() => fail(failure), seconds * 1000);
+ }
+ waiting('接続サービスにアクセス中…','接続サービスに到達できませんでした。通信環境を確認して再試行してください。',15);
+ const options = {config:{iceServers:[
+  {urls:['stun:stun.l.google.com:19302','stun:stun.cloudflare.com:3478']},
+  {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'],username:'peerjs',credential:'peerjsp'}
+ ]}};
+ try { r.peer=host ? new Peer(prefix+code,options) : new Peer(options); }
+ catch { fail('通信機能を起動できませんでした。'); return; }
+ r.peer.on('error', e => {
+  if (r.host && r.state && ['peer-unavailable','network'].includes(e.type)) return;
+  const messages = {
+   'unavailable-id':'ルームコードが重なりました。もう一度作成してください。',
+   'peer-unavailable':'ルームが見つかりません。ホストがロビーを開いているか、最新の招待リンクかを確認してください。',
+   'network':'接続サービスとの通信に失敗しました。通信環境を確認して再試行してください。'
+  };
+  fail(messages[e.type] || 'オンライン接続に失敗しました。通信環境を確認して再試行してください。');
+ });
+ r.peer.on('disconnected', () => {
+  if (session === r && r.host && r.state && !r.peer.destroyed) {
+   setTimeout(() => {
+    if (session === r && r.peer.disconnected && !r.peer.destroyed) r.peer.reconnect();
+   }, 1200);
+  }
+ });
  r.peer.on('open',()=>{if(session!==r)return;
- if(host){clearTimeout(r.timeout);r.state={phase:'lobby',seconds:duration,genres:chosen(),ids:[r.peer.id],names:{[r.peer.id]:nickname},turn:0,results:[]};show(r)}
- else{const c=r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}});c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>c.send({type:'ping',sent:Date.now()}));c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c}
+ if(host){if(r.state)return;clearTimeout(r.timeout);r.state={phase:'lobby',seconds:duration,genres:chosen(),ids:[r.peer.id],names:{[r.peer.id]:nickname},turn:0,results:[]};show(r)}
+ else{
+ waiting('ホストに接続中…','ホストとの通信経路を確立できませんでした。ホストのロビーを開いたまま、Wi-Fiとモバイル通信を切り替えて再試行してください。',18);
+ const c=r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}});c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>{
+  if(!r.state) waiting('入室情報を受信中…','ホストから入室情報が届きませんでした。ホストの画面を開いて再試行してください。',10);
+  c.send({type:'ping',sent:Date.now(),initial:!r.state});
+ });c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c}
  let beats=0;r.clock=setInterval(()=>{if(session!==r)return;tick(r);if(++beats%40===0&&r.uplink?.open)r.uplink.send({type:'ping',sent:Date.now()})},125)});
  r.peer.on('connection',c=>{if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||s.phase!=='lobby'||s.ids.length>=8){c.send({type:'reject',reason:'満員またはゲーム開始後のため参加できません。'});setTimeout(()=>c.close(),500);return}
  const requested = c.metadata?.nickname;
@@ -212,7 +258,10 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
   if (m && m.turn === state.serial && c.peer === state.ids[state.turn]) {
    turnAction(r, m.type, m.ok);
   }
-  if(c.open&&r.links.has(c.peer)&&m?.type==='ping'&&Number.isFinite(m.sent))c.send({type:'pong',sent:m.sent,now:Date.now()})});
+  if(c.open && m?.type==='ping' && Number.isFinite(m.sent)) {
+   c.send({type:'pong',sent:m.sent,now:Date.now()});
+   if(m.initial) c.send({type:'state',s:r.state,now:Date.now()});
+  }});
  const lost=()=>{if(session!==r||!r.links.delete(c.peer))return;if(r.state.phase==='finished')return;if(r.state.phase!=='lobby'){fail('参加者が退出したため、ルームを終了しました。');return}delete r.state.names[c.peer];r.state.ids=r.state.ids.filter(id=>id!==c.peer);publish(r)};c.on('close',lost);c.on('error',lost)});
 }
 const invitedRoom = new URLSearchParams(location.search).get('room');
