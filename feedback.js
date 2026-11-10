@@ -54,3 +54,42 @@ function makeCountdown(container) {
   return value;
  };
 }
+
+// Short voiced "ha" bursts. The falling pitch and vowel resonances shape each chuckle.
+let activeLaugh;
+function playLaugh() {
+ const level = Number(volume.value) / 100;
+ if (!level || !soundOn || audioCtx?.state !== 'running') return;
+ activeLaugh?.disconnect();
+ const mix = audioCtx.createGain();
+ activeLaugh = mix;
+ mix.gain.value = level * 0.45;
+ mix.connect(audioCtx.destination);
+ const voice = audioCtx.createOscillator();
+ voice.type = 'sawtooth';
+ const envelope = audioCtx.createGain();
+ envelope.gain.value = 0;
+ voice.connect(envelope);
+ for (const [frequency, strength] of [[780, 1], [1240, 0.75], [2550, 0.25]]) {
+  const resonance = audioCtx.createBiquadFilter();
+  resonance.type = 'bandpass';
+  resonance.frequency.value = frequency;
+  resonance.Q.value = 4;
+  const gain = audioCtx.createGain();
+  gain.gain.value = strength;
+  envelope.connect(resonance).connect(gain).connect(mix);
+ }
+ const start = audioCtx.currentTime;
+ const pitch = 220 + Math.random() * 60;
+ [0, 0.15, 0.32, 0.51].forEach((offset, i) => {
+  const t = start + offset;
+  voice.frequency.setValueAtTime(pitch * (1.15 - i * 0.07), t);
+  voice.frequency.exponentialRampToValueAtTime(pitch * 0.66, t + 0.12);
+  envelope.gain.setValueAtTime(0, t);
+  envelope.gain.linearRampToValueAtTime(0.95 - i * 0.11, t + 0.024);
+  envelope.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+ });
+ voice.onended = () => { mix.disconnect(); if (activeLaugh === mix) activeLaugh = null; };
+ voice.start(start);
+ voice.stop(start + 0.68);
+}

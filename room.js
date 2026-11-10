@@ -71,6 +71,13 @@ function showRoster(r) {
  });
  if (editable) roster.append(shuffleButton(s.ids, reorder));
 }
+function relayLaugh(r, sender, turn) {
+ const s = r.state;
+ if (s.phase !== 'play' || turn !== s.serial || !s.ids.includes(sender) || sender === s.ids[s.turn]) return;
+ const event = {type:'laugh', turn};
+ for (const link of r.links.values()) if (link.open) link.send(event);
+ playLaugh();
+}
 function turnAction(r, type, ok) {
  const s = r.state;
  if (!r.host) {
@@ -127,6 +134,12 @@ function show(r){if(session!==r)return;const s=r.state;stage.replaceChildren();s
  if (s.phase === 'play') {
   if (r.lastCue !== 'start'+s.serial) { cue('start'); r.lastCue = 'start'+s.serial; }
   r.gauge = makeGauge(stage,s.seconds);
+  if (r.peer.id !== s.ids[s.turn]) {
+   action('ガヤボタン（笑い声）', () => {
+    if (r.host) relayLaugh(r, r.peer.id, s.serial);
+    else if (r.uplink?.open) r.uplink.send({type:'laugh', turn:s.serial});
+   });
+  }
   if (canAct) action('オチを言い終えた', () => turnAction(r,'finishTalk'));
   tick(r);
  }
@@ -177,7 +190,7 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  r.peer.on('error',e=>fail(e.type==='unavailable-id'?'コードが重なりました。もう一度作成してください。':'接続できませんでした。ホストの画面とルームコードを確認してください。'));
  r.peer.on('open',()=>{if(session!==r)return;
  if(host){clearTimeout(r.timeout);r.state={phase:'lobby',seconds:duration,genres:chosen(),ids:[r.peer.id],names:{[r.peer.id]:nickname},turn:0,results:[]};show(r)}
- else{const c=r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}});c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>c.send({type:'ping',sent:Date.now()}));c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c}
+ else{const c=r.peer.connect(prefix+code,{reliable:true,metadata:{nickname}});c.on('data',m=>{if(session!==r)return;if(m.type==='reject'){fail(m.reason);return}if(m.type==='laugh'){if(r.state?.phase==='play' && r.state.serial===m.turn)playLaugh();return}if(m.type==='pong'){r.offset=m.now-(Date.now()+m.sent)/2;return}if(m.type!=='state')return;clearTimeout(r.timeout);if(!r.state)r.offset=m.now-Date.now();r.state=m.s;show(r)});c.on('open',()=>c.send({type:'ping',sent:Date.now()}));c.on('close',()=>{if(r.state?.phase!=='finished')fail('ホストとの接続が終了しました。')});c.on('error',()=>fail('ホストとの通信が切れました。'));r.uplink=c}
  let beats=0;r.clock=setInterval(()=>{if(session!==r)return;tick(r);if(++beats%40===0&&r.uplink?.open)r.uplink.send({type:'ping',sent:Date.now()})},125)});
  r.peer.on('connection',c=>{if(!host){c.close();return}c.on('open',()=>{if(session!==r)return;const s=r.state;if(!s||s.phase!=='lobby'||s.ids.length>=8){c.send({type:'reject',reason:'満員またはゲーム開始後のため参加できません。'});setTimeout(()=>c.close(),500);return}
  const requested = c.metadata?.nickname;
@@ -192,6 +205,10 @@ function begin(host){if(session)return;const code=host?String(crypto.getRandomVa
  c.on('data',m=>{
   if (session !== r || r.links.get(c.peer) !== c) return;
   const state = r.state;
+  if (m?.type === 'laugh') {
+   relayLaugh(r, c.peer, m.turn);
+   return;
+  }
   if (m && m.turn === state.serial && c.peer === state.ids[state.turn]) {
    turnAction(r, m.type, m.ok);
   }
